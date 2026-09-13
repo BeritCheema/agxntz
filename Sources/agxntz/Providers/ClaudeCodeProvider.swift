@@ -115,8 +115,102 @@ struct ClaudeCodeProvider: AgentProvider {
             id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
             lastMessage: lastAssistantText?.messageSnippet,
-            debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive)"
+            debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive)",
+            subAgents: scanSubAgents(parentDir: file.deletingPathExtension(), cwd: cwd, now: now, parentAlive: alive)
         )
+    }
+
+    /// Sub-agents live in <projectDir>/<sessionID>/subagents/agent-<id>.jsonl,
+    /// one file per sub-agent, each a full sidechain transcript.
+    private func scanSubAgents(parentDir: URL, cwd: String?, now: Date, parentAlive: Bool) -> [AgentSession] {
+        let dir = parentDir.appendingPathComponent("subagents")
+        var out: [AgentSession] = []
+        for (file, mtime) in FileUtil.recentFiles(in: dir, suffix: ".jsonl", now: now) {
+            if let sub = parseSubAgent(file: file, mtime: mtime, cwd: cwd, now: now, parentAlive: parentAlive) {
+                out.append(sub)
+            }
+        }
+        // Newest activity first.
+        return out.sorted { $0.state == $1.state ? $0.lastActivityAt > $1.lastActivityAt : $0.state < $1.state }
+    }
+
+    private func parseSubAgent(file: URL, mtime: Date, cwd: String?, now: Date, parentAlive: Bool) -> AgentSession? {
+        let lines = FileUtil.tailLines(of: file, maxBytes: 1024 * 1024)
+        guard !lines.isEmpty else { return nil }
+
+        var lastMeaningful: [String: Any]?
+        var lastMeaningfulTS: Date?
+        var lastAssistant: [String: Any]?
+        var lastAssistantText: String?
+        var label: String?
+        var firstTS: Date?
+
+        for line in lines {
+            guard let obj = FileUtil.json(line), let type = obj["type"] as? String else { continue }
+            if firstTS == nil, let ts = obj["timestamp"] as? String { firstTS = ISO8601.parse(ts) }
+            guard type == "user" || type == "assistant" else { continue }
+            lastMeaningful = obj
+            lastMeaningfulTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? lastMeaningfulTS
+            if type == "assistant" {
+                lastAssistant = obj
+                if let text = Self.assistantText(obj) { lastAssistantText = text }
+            }
+            // The first user message is the task prompt — use it as the label.
+            if type == "user", label == nil, let prompt = Self.userText(obj) {
+                label = prompt
+            }
+        }
+        guard let lastMeaningful else { return nil }
+
+        let lastActivity = lastMeaningfulTS ?? mtime
+        let age = now.timeIntervalSince(lastActivity)
+
+        // Sub-agents run autonomously (no permission prompts), so a trailing
+        // tool_use is a running tool -> working, not waiting.
+        var state: SessionState
+        if age < Tuning.workingWindow {
+            state = .working
+        } else if (lastMeaningful["type"] as? String) == "assistant",
+                  !Self.contentTypes(of: lastMeaningful).contains("tool_use") {
+            state = age >= 30 ? .done : .working
+        } else {
+            state = parentAlive ? .working : .done
+        }
+
+        // Sub-agents are ephemeral: keep only while running, or briefly after
+        // finishing so completion is visible; drop dead ones fast.
+        if !parentAlive { return nil }
+        if state == .done && age > 2 * 60 { return nil }
+
+        let agentID = file.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "agent-", with: "")
+        let activity = Self.activity(state: state, lastAssistant: lastAssistant)
+
+        return AgentSession(
+            id: "claude-sub:\(agentID)", kind: kind,
+            projectName: Self.shortLabel(label) ?? "subagent", cwd: cwd,
+            activity: activity, state: state,
+            startedAt: firstTS ?? lastActivity, lastActivityAt: lastActivity,
+            lastMessage: lastAssistantText?.messageSnippet,
+            debugInfo: "subagent age=\(Int(age))s"
+        )
+    }
+
+    /// A short, single-line label from the sub-agent's task prompt.
+    private static func shortLabel(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !collapsed.isEmpty else { return nil }
+        return collapsed.count > 36 ? String(collapsed.prefix(36)) + "…" : collapsed
+    }
+
+    private static func userText(_ record: [String: Any]) -> String? {
+        guard let message = record["message"] as? [String: Any] else { return nil }
+        if let s = message["content"] as? String { return s }
+        guard let content = message["content"] as? [[String: Any]] else { return nil }
+        let texts = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+        let joined = texts.joined(separator: " ")
+        return joined.isEmpty ? nil : joined
     }
 
     /// Turn Claude Code's encoded project-dir name back into a rough path so

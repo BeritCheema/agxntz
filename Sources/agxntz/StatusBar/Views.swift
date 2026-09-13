@@ -148,10 +148,22 @@ struct SessionRow: View {
     let session: AgentSession
     @ObservedObject var store: SessionStore
     @State private var hovering = false
+    @State private var expanded = false
 
     var body: some View {
-        // cmux-style row: header line with identity + time + pin, then the
-        // live status, then the agent's latest message text.
+        VStack(alignment: .leading, spacing: 0) {
+            mainRow
+            if expanded {
+                ForEach(session.subAgents) { sub in
+                    SubAgentRow(session: sub, store: store)
+                }
+            }
+        }
+    }
+
+    // cmux-style row: header line with identity + sub-agents + time + pin,
+    // then the live status, then the agent's latest message text.
+    private var mainRow: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Circle()
@@ -167,6 +179,25 @@ struct SessionRow: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
+                // One dot per sub-agent, tinted by its state. Tapping toggles
+                // the nested list below.
+                if !session.subAgents.isEmpty {
+                    Button {
+                        expanded.toggle()
+                    } label: {
+                        HStack(spacing: 3) {
+                            ForEach(session.subAgents) { sub in
+                                Circle().fill(sub.state.color).frame(width: 6, height: 6)
+                            }
+                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(session.subAgents.count) sub-agent\(session.subAgents.count == 1 ? "" : "s")")
+                }
+
                 Spacer(minLength: 8)
 
                 Text(session.state == .done ? AgentSession.shortDuration(-session.lastActivityAt.timeIntervalSinceNow) + " ago" : session.elapsedText)
@@ -174,15 +205,7 @@ struct SessionRow: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
 
-                Button {
-                    store.togglePin(session.id)
-                } label: {
-                    Image(systemName: store.isPinned(session.id) ? "pin.fill" : "pin")
-                        .font(.system(size: 11))
-                        .foregroundStyle(store.isPinned(session.id) ? Color.accentColor : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(store.isPinned(session.id) ? "Unpin from menu bar" : "Pin to menu bar")
+                PinButton(id: session.id, store: store)
             }
 
             Text(session.state == .done ? "finished" : session.activity)
@@ -205,5 +228,63 @@ struct SessionRow: View {
         .padding(.vertical, 5)
         .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
         .onHover { hovering = $0 }
+    }
+}
+
+/// A sub-agent, rendered indented beneath its parent session.
+struct SubAgentRow: View {
+    let session: AgentSession
+    @ObservedObject var store: SessionStore
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle()
+                .fill(session.state.color)
+                .frame(width: 7, height: 7)
+                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 3 }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.projectName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Text(session.state == .done ? "finished" : session.activity)
+                    .font(.system(size: 11))
+                    .foregroundStyle(session.state == .done ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(session.state == .done ? AgentSession.shortDuration(-session.lastActivityAt.timeIntervalSinceNow) + " ago" : session.elapsedText)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            PinButton(id: session.id, store: store)
+        }
+        .padding(.leading, 34)
+        .padding(.trailing, 14)
+        .padding(.vertical, 4)
+        .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
+        .onHover { hovering = $0 }
+    }
+}
+
+struct PinButton: View {
+    let id: String
+    @ObservedObject var store: SessionStore
+
+    var body: some View {
+        Button {
+            store.togglePin(id)
+        } label: {
+            Image(systemName: store.isPinned(id) ? "pin.fill" : "pin")
+                .font(.system(size: 11))
+                .foregroundStyle(store.isPinned(id) ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(store.isPinned(id) ? "Unpin from menu bar" : "Pin to menu bar")
     }
 }

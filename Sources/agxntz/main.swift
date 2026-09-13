@@ -18,6 +18,9 @@ if arguments.contains("--scan") {
     for provider in providers {
         for s in provider.scan(now: now, processes: processes) {
             print("[\(s.kind.rawValue)] \(s.projectName) — \(s.state) — \(s.activity) — started \(s.elapsedText) ago — id \(s.id) — \(s.debugInfo ?? "")")
+            for sub in s.subAgents {
+                print("    ↳ \(sub.projectName) — \(sub.state) — \(sub.activity) — \(sub.elapsedText) — id \(sub.id)")
+            }
         }
     }
     exit(0)

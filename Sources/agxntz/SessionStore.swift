@@ -50,8 +50,8 @@ final class SessionStore: ObservableObject {
                     self.logTransitions(from: self.sessions, to: result)
                     self.sessions = result
                 }
-                // Drop pins whose sessions no longer exist.
-                let live = Set(result.map(\.id))
+                // Drop pins whose sessions no longer exist (sub-agents too).
+                let live = Set(result.flatMap { [$0.id] + $0.subAgents.map(\.id) })
                 let kept = self.pinnedIDs.filter(live.contains)
                 if kept != self.pinnedIDs { self.setPins(kept) }
             }
@@ -72,8 +72,15 @@ final class SessionStore: ObservableObject {
         sessions.contains { !pinnedIDs.contains($0.id) }
     }
 
+    /// Every monitorable entity: main sessions plus their sub-agents. Used so
+    /// a sub-agent can be pinned and resolved just like a main session.
+    var allMonitorable: [AgentSession] {
+        sessions + sessions.flatMap(\.subAgents)
+    }
+
     var pinnedSessions: [AgentSession] {
-        pinnedIDs.compactMap { id in sessions.first { $0.id == id } }
+        let all = allMonitorable
+        return pinnedIDs.compactMap { id in all.first { $0.id == id } }
     }
 
     func isPinned(_ id: String) -> Bool { pinnedIDs.contains(id) }
