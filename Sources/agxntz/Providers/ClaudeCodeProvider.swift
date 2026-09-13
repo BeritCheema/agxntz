@@ -130,8 +130,8 @@ struct ClaudeCodeProvider: AgentProvider {
     }
 
     private static func heuristicState(lastRecord: [String: Any], age: TimeInterval, alive: Bool) -> SessionState {
-        let type = lastRecord["type"] as? String
-        if type == "assistant" {
+        switch lastRecord["type"] as? String {
+        case "assistant":
             // Assistant ended on a tool_use with no tool_result yet -> a
             // permission prompt is likely pending.
             if contentTypes(of: lastRecord).contains("tool_use") { return .waiting }
@@ -139,12 +139,18 @@ struct ClaudeCodeProvider: AgentProvider {
             // also be a mid-turn status update with the next tool call still
             // being generated — debounce before declaring the turn done.
             return age >= 30 ? .done : .working
+        case "system":
+            // Claude Code writes standalone system records (stop_hook_summary,
+            // turn_duration, away_summary) the moment a turn finishes, so a
+            // trailing system record means the turn is done.
+            return .done
+        default:
+            // Last record is user input or a tool result: the assistant owes
+            // a response. Generation (thinking, long replies) can run for
+            // minutes without a transcript write, so this is WORKING no matter
+            // how old the last write is — never "waiting".
+            return alive ? .working : .done
         }
-        // Last record is user input or a tool result: the assistant owes a
-        // response. Generation (thinking, long replies) can run for minutes
-        // without a single transcript write, so this is WORKING no matter
-        // how old the last write is — never "waiting".
-        return alive ? .working : .done
     }
 
     /// True for records representing an actual typed user prompt, as opposed
