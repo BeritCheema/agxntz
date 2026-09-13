@@ -1,27 +1,19 @@
 import Foundation
 
 /// Claude Code: transcripts at ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl.
-/// State comes from hook events (~/.agxntz/claude-events.jsonl) when the
-/// hooks are installed, with transcript-tail heuristics as fallback.
+/// State is derived purely from reading the transcript tail — no hooks.
 struct ClaudeCodeProvider: AgentProvider {
     let kind = AgentKind.claude
     private let projectsDir = FileUtil.home.appendingPathComponent(".claude/projects")
 
-    struct HookEvent {
-        let event: String
-        let ts: Date
-    }
-
     func scan(now: Date, processes: ProcessSnapshot) -> [AgentSession] {
-        let hookEvents = Self.loadHookEvents()
         var sessions: [AgentSession] = []
-
         for projectDir in FileUtil.subdirectories(of: projectsDir) {
             for (file, mtime) in FileUtil.recentFiles(in: projectDir, suffix: ".jsonl", now: now) {
                 let sessionID = file.deletingPathExtension().lastPathComponent
                 guard let session = parse(
                     file: file, mtime: mtime, sessionID: sessionID,
-                    hookEvent: hookEvents[sessionID], now: now, processes: processes
+                    now: now, processes: processes
                 ) else { continue }
                 sessions.append(session)
             }
@@ -30,7 +22,7 @@ struct ClaudeCodeProvider: AgentProvider {
     }
 
     private func parse(file: URL, mtime: Date, sessionID: String,
-                       hookEvent: HookEvent?, now: Date, processes: ProcessSnapshot) -> AgentSession? {
+                       now: Date, processes: ProcessSnapshot) -> AgentSession? {
         let lines = FileUtil.tailLines(of: file)
         guard !lines.isEmpty else { return nil }
 
@@ -64,13 +56,12 @@ struct ClaudeCodeProvider: AgentProvider {
         }
 
         // Session summary/index files have no conversation records.
-        guard lastMeaningful != nil || hookEvent != nil else { return nil }
+        guard let lastMeaningful else { return nil }
 
         // Claude Code appends bookkeeping records (bridge-session etc.) to
         // idle session files, so mtime alone overstates activity. Anchor on
         // the last real conversation record when we have its timestamp.
-        var lastActivity = lastMeaningfulTS ?? mtime
-        if let hook = hookEvent, hook.ts > lastActivity { lastActivity = hook.ts }
+        let lastActivity = lastMeaningfulTS ?? mtime
         guard now.timeIntervalSince(lastActivity) < Tuning.scanWindow else { return nil }
 
         // "Elapsed" means time on the current task: since the last human
@@ -82,25 +73,8 @@ struct ClaudeCodeProvider: AgentProvider {
         var state: SessionState
         if age < Tuning.workingWindow {
             state = .working
-        } else if let last = lastMeaningful {
-            state = Self.heuristicState(lastRecord: last, age: age, alive: alive)
         } else {
-            state = alive ? .waiting : .done
-        }
-
-        // Hook events are authoritative when newer than the transcript tail.
-        if let hook = hookEvent, hook.ts >= lastActivity.addingTimeInterval(-2) {
-            switch hook.event {
-            case "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionStart":
-                state = age < 60 ? .working : state
-            case "Notification":
-                state = .waiting
-            case "Stop", "SubagentStop":
-                state = age < Tuning.workingWindow ? .working : .done
-            case "SessionEnd":
-                return nil
-            default: break
-            }
+            state = Self.heuristicState(lastRecord: lastMeaningful, age: age, alive: alive)
         }
 
         if state != .done && !alive { return nil }
@@ -113,7 +87,7 @@ struct ClaudeCodeProvider: AgentProvider {
             id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
             lastMessage: lastAssistantText?.messageSnippet,
-            debugInfo: "lastType=\(lastMeaningful?["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive) hook=\(hookEvent?.event ?? "none")"
+            debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive)"
         )
     }
 
@@ -133,7 +107,10 @@ struct ClaudeCodeProvider: AgentProvider {
             // Assistant ended on a tool_use with no tool_result yet -> a
             // permission prompt is likely pending.
             if contentTypes(of: lastRecord).contains("tool_use") { return .waiting }
-            return .done // finished its turn with a text reply
+            // A trailing text reply usually means the turn ended, but it can
+            // also be a mid-turn status update with the next tool call still
+            // being generated — debounce before declaring the turn done.
+            return age >= 30 ? .done : .working
         }
         // Last record is user input or a tool result: the assistant owes a
         // response. Generation (thinking, long replies) can run for minutes
@@ -199,23 +176,6 @@ struct ClaudeCodeProvider: AgentProvider {
         }
     }
 
-    // MARK: - Hook events
-
-    static let eventsFile = FileUtil.home.appendingPathComponent(".agxntz/claude-events.jsonl")
-
-    private static func loadHookEvents() -> [String: HookEvent] {
-        var latest: [String: HookEvent] = [:]
-        for line in FileUtil.tailLines(of: eventsFile, maxBytes: 64 * 1024) {
-            guard let obj = FileUtil.json(line),
-                  let event = obj["event"] as? String,
-                  let sessionID = obj["sessionId"] as? String,
-                  let tsString = obj["ts"] as? String,
-                  let ts = ISO8601.parse(tsString) else { continue }
-            if let existing = latest[sessionID], existing.ts > ts { continue }
-            latest[sessionID] = HookEvent(event: event, ts: ts)
-        }
-        return latest
-    }
 }
 
 enum ISO8601 {

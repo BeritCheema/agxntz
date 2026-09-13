@@ -131,14 +131,6 @@ final class StatusBarController: NSObject {
             menu.addItem(.separator())
         }
 
-        let hooks = NSMenuItem(
-            title: ClaudeHookInstaller.isInstalled ? "Claude Code Hooks Installed ✓" : "Install Claude Code Hooks…",
-            action: ClaudeHookInstaller.isInstalled ? nil : #selector(installHooks),
-            keyEquivalent: ""
-        )
-        hooks.target = self
-        menu.addItem(hooks)
-        menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit agxntz", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -153,17 +145,6 @@ final class StatusBarController: NSObject {
     @objc private func unpinClicked(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String {
             store.togglePin(id)
-        }
-    }
-
-    @objc private func installHooks() {
-        do {
-            try ClaudeHookInstaller.install()
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Could not install Claude Code hooks"
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
         }
     }
 

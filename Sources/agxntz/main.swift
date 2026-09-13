@@ -7,24 +7,6 @@ Log.enabled = arguments.contains("--debug")
     || arguments.contains("--scan")
     || ProcessInfo.processInfo.environment["AGXNTZ_DEBUG"] == "1"
 
-// Hook mode: called by Claude Code hooks; append the event and exit.
-if let flagIndex = arguments.firstIndex(of: "--claude-hook"), arguments.count > flagIndex + 1 {
-    ClaudeHookInstaller.runHookMode(event: arguments[flagIndex + 1])
-    exit(0)
-}
-
-// Install Claude Code hooks from the command line.
-if arguments.contains("--install-claude-hooks") {
-    do {
-        try ClaudeHookInstaller.install()
-        print("Claude Code hooks installed (shim: \(ClaudeHookInstaller.shimPath.path))")
-        exit(0)
-    } catch {
-        FileHandle.standardError.write(Data("hook install failed: \(error)\n".utf8))
-        exit(1)
-    }
-}
-
 // Debug mode: one detection pass, printed to stdout.
 if arguments.contains("--scan") {
     let now = Date()

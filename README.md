@@ -17,7 +17,7 @@ get their own menu-bar item showing a colored dot plus the live activity text.
 
 | Agent | Source watched | State quality |
 |---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl` + optional hooks | best (hooks) / good (heuristic) |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | good |
 | Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | good |
 | OpenCode | `~/.local/share/opencode/storage/{session,message}` | good |
 | Grok CLI | `~/.grok/sessions/` (`GROK_HOME` honored) | heuristic |
@@ -29,26 +29,14 @@ transcript-tail parsing with a process-liveness check (`ps`), polled every 2s.
 
 ### State rules
 
-- **working** — transcript written to within the last 12s (or a fresh hook event)
-- **waiting** — assistant stopped on a pending tool call (permission prompt),
-  or a `Notification` hook fired
-- **done** — assistant finished its turn; the session drops off 30 minutes
+- **working** — transcript written to within the last 12s, or a turn is in
+  flight (the last record is user input / a tool result and the agent owes a
+  response — generation writes nothing until it produces output)
+- **waiting** — assistant stopped on a pending tool call (permission prompt)
+- **done** — assistant finished its turn with a text reply (debounced 30s to
+  avoid flagging mid-turn status text); the session drops off 30 minutes
   after its last activity
 - a session whose agent process is gone disappears immediately (unless done)
-
-### Claude Code hooks (recommended)
-
-For exact state (instead of heuristics), install the hooks — either from the
-right-click menu on the counters, or:
-
-```sh
-dist/agxntz.app/Contents/MacOS/agxntz --install-claude-hooks
-```
-
-This writes a shim to `~/.agxntz/claude-hook.sh` and registers it in
-`~/.claude/settings.json` for `UserPromptSubmit`, `PreToolUse`, `Notification`,
-`Stop`, `SubagentStop`, and `SessionEnd`. Events land in
-`~/.agxntz/claude-events.jsonl` (auto-trimmed).
 
 ## Build & run
 
