@@ -25,7 +25,7 @@ struct CounterView: View {
     var body: some View {
         HStack(spacing: 10) {
             ForEach([SessionState.working, .waiting, .done], id: \.rawValue) { state in
-                let count = store.count(of: state)
+                let count = store.unpinnedCount(of: state)
                 if count > 0 {
                     HStack(spacing: 4) {
                         Circle().fill(state.color).frame(width: 8, height: 8)
@@ -47,14 +47,23 @@ struct PinnedItemView: View {
     let session: AgentSession
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(session.state.color).frame(width: 8, height: 8)
-            Text(session.state == .done ? "done" : session.activity)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 140)
-                .fixedSize(horizontal: true, vertical: false)
+        Group {
+            if session.state == .done {
+                // Finished: a single glyph, no text.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(session.state.color)
+            } else {
+                HStack(spacing: 5) {
+                    Circle().fill(session.state.color).frame(width: 8, height: 8)
+                    Text(session.activity)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 140)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
         }
         .padding(.horizontal, 6)
         .frame(height: 22)

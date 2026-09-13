@@ -58,8 +58,14 @@ final class SessionStore: ObservableObject {
         sessions.filter { $0.state == state }
     }
 
-    func count(of state: SessionState) -> Int {
-        sessions.lazy.filter { $0.state == state }.count
+    /// Aggregate counters exclude pinned sessions — those already have their
+    /// own menu-bar item, and counting them twice reads as duplication.
+    func unpinnedCount(of state: SessionState) -> Int {
+        sessions.lazy.filter { $0.state == state && !self.pinnedIDs.contains($0.id) }.count
+    }
+
+    var hasUnpinnedSessions: Bool {
+        sessions.contains { !pinnedIDs.contains($0.id) }
     }
 
     var pinnedSessions: [AgentSession] {

@@ -3,11 +3,11 @@ import SwiftUI
 import Combine
 
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate {
+final class StatusBarController: NSObject {
     private let store: SessionStore
     private var aggregateItem: NSStatusItem?
     private var pinnedItems: [String: NSStatusItem] = [:]
-    private var popover: NSPopover?
+    private var panel: DropdownPanel?
     private var cancellables = Set<AnyCancellable>()
 
     init(store: SessionStore) {
@@ -27,10 +27,11 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private func sync() {
         syncAggregate()
         syncPinned()
+        panel?.layoutBelowAnchor()
     }
 
     private func syncAggregate() {
-        let hasSessions = !store.sessions.isEmpty
+        let hasSessions = store.hasUnpinnedSessions
         if hasSessions {
             if aggregateItem == nil {
                 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -95,26 +96,28 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             showContextMenu(for: sender)
             return
         }
-        togglePopover(from: sender)
+        togglePanel(from: sender)
     }
 
-    private func togglePopover(from button: NSStatusBarButton) {
-        if let popover, popover.isShown {
-            popover.performClose(nil)
-            self.popover = nil
-            return
+    private func togglePanel(from button: NSStatusBarButton) {
+        if let panel {
+            let sameAnchor = panel.anchorButton === button
+            panel.dismiss()
+            if sameAnchor { return } // plain toggle-off
         }
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = false
-        popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: DropdownView(store: store))
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        self.popover = popover
-    }
-
-    nonisolated func popoverDidClose(_ notification: Notification) {
-        Task { @MainActor in self.popover = nil }
+        let panel = DropdownPanel(store: store)
+        panel.onClose = { [weak self] in self?.panel = nil }
+        panel.ownedWindows = { [weak self] in
+            guard let self else { return [] }
+            var windows: [NSWindow] = []
+            if let w = self.aggregateItem?.button?.window { windows.append(w) }
+            for item in self.pinnedItems.values {
+                if let w = item.button?.window { windows.append(w) }
+            }
+            return windows
+        }
+        panel.show(below: button)
+        self.panel = panel
     }
 
     private func showContextMenu(for button: NSStatusBarButton) {
