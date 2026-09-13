@@ -80,7 +80,8 @@ struct PiFamilyProvider: AgentProvider {
         guard lastRole != nil else { return nil }
 
         let age = now.timeIntervalSince(mtime)
-        let alive = processes.isRunning(kind)
+        let resolvedCwd = cwd ?? groupDir.lastPathComponent.replacingOccurrences(of: "-", with: "/")
+        let alive = processes.isLive(kind, cwd: resolvedCwd, transcriptPath: file.path)
         // A trailing assistant tool call means the tool is *running* — these
         // agents don't record a distinct permission-prompt state in the
         // transcript, so a pending call is working, not waiting. (A running
@@ -101,8 +102,7 @@ struct PiFamilyProvider: AgentProvider {
             state = alive ? .working : .done
         }
 
-        if state != .done && !alive { return nil }
-        if state == .done && age > Tuning.doneRetention { return nil }
+        if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
 
         let activity: String
         switch state {
@@ -110,8 +110,6 @@ struct PiFamilyProvider: AgentProvider {
         case .waiting: activity = "waiting for you"
         case .working: activity = (toolRunning ? lastToolName.map { "running \($0)" } : nil) ?? "working"
         }
-
-        let resolvedCwd = cwd ?? groupDir.lastPathComponent.replacingOccurrences(of: "-", with: "/")
 
         return AgentSession(
             id: "\(kind.idPrefix):\(sessionID)", kind: kind,

@@ -34,9 +34,22 @@ transcript-tail parsing with a process-liveness check (`ps`), polled every 2s.
   response — generation writes nothing until it produces output)
 - **waiting** — assistant stopped on a pending tool call (permission prompt)
 - **done** — assistant finished its turn with a text reply (debounced 30s to
-  avoid flagging mid-turn status text); the session drops off 30 minutes
-  after its last activity
-- a session whose agent process is gone disappears immediately (unless done)
+  avoid flagging mid-turn status text)
+
+### Liveness & retention
+
+There is no reliable per-session process signal for a passive monitor (unlike
+runtimes such as cmux/herdr that own the agent process), so liveness is
+best-effort, combining: a process holding the session's transcript file open
+(`lsof`), a process of that kind running in the session's cwd or an ancestor
+of it, and a coarse "is the kind running" fallback. From that:
+
+- a session **backed by a live process** stays up to **30 min** after its last
+  activity, so you notice completion
+- a session whose **process looks gone** (killed / CLI closed) is kept only
+  **~2 min**, then disappears. Actively-writing sessions always fall inside
+  that window, so a genuinely live session is never dropped even if process
+  detection misses it.
 
 ## Build & run
 

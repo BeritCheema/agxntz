@@ -59,7 +59,7 @@ struct ClaudeCodeProvider: AgentProvider {
             }
         }
 
-        let alive = processes.isRunning(kind)
+        let alive = processes.isLive(kind, cwd: cwd, transcriptPath: file.path)
 
         // Fallback: the tail was entirely one oversized record (no parseable
         // conversation line). Rather than drop what may be an active session,
@@ -71,7 +71,7 @@ struct ClaudeCodeProvider: AgentProvider {
             let state: SessionState = age < Tuning.workingWindow
                 ? .working
                 : (alive ? .working : .done)
-            if state != .done && !alive { return nil }
+            if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
             let project = (cwd ?? Self.decodeDir(file.deletingLastPathComponent().lastPathComponent)).projectNameFromPath
             return AgentSession(
                 id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
@@ -99,8 +99,7 @@ struct ClaudeCodeProvider: AgentProvider {
             state = Self.heuristicState(lastRecord: lastMeaningful, age: age, alive: alive)
         }
 
-        if state != .done && !alive { return nil }
-        if state == .done && age > Tuning.doneRetention { return nil }
+        if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
 
         let activity = Self.activity(state: state, lastAssistant: lastAssistant)
         let project = (cwd ?? Self.decodeDir(file.deletingLastPathComponent().lastPathComponent)).projectNameFromPath

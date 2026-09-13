@@ -76,7 +76,7 @@ struct CodexProvider: AgentProvider {
         }
 
         let age = now.timeIntervalSince(mtime)
-        let alive = processes.isRunning(kind)
+        let alive = processes.isLive(kind, cwd: cwd, transcriptPath: file.path)
 
         var state: SessionState
         if age < Tuning.workingWindow {
@@ -97,8 +97,7 @@ struct CodexProvider: AgentProvider {
             }
         }
 
-        if state != .done && !alive { return nil }
-        if state == .done && age > Tuning.doneRetention { return nil }
+        if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
 
         var activity: String
         switch state {

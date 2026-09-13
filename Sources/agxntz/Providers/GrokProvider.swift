@@ -66,7 +66,7 @@ enum GenericTailClassifier {
                         cwd: String?, now: Date, processes: ProcessSnapshot,
                         id: String? = nil) -> AgentSession? {
         let age = now.timeIntervalSince(mtime)
-        let alive = processes.isRunning(kind)
+        let alive = processes.isLive(kind, cwd: cwd, transcriptPath: file.path)
         let lastLine = FileUtil.tailLines(of: file, maxBytes: 32 * 1024).last ?? ""
 
         let assistantEnded = lastLine.contains("\"role\":\"assistant\"") || lastLine.contains("\"role\": \"assistant\"")
@@ -84,8 +84,7 @@ enum GenericTailClassifier {
             state = age < 90 ? .working : (alive ? .waiting : .done)
         }
 
-        if state != .done && !alive { return nil }
-        if state == .done && age > Tuning.doneRetention { return nil }
+        if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
 
         let activity: String
         switch state {

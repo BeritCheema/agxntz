@@ -89,8 +89,21 @@ extension AgentSession {
 enum Tuning {
     /// A write within this window means the agent is actively working.
     static let workingWindow: TimeInterval = 12
-    /// Done sessions disappear this long after their last activity.
+    /// A session backed by a live process lingers this long after its last
+    /// activity (so you notice completion) before dropping.
     static let doneRetention: TimeInterval = 30 * 60
+    /// A session whose process is gone (killed / CLI closed) is kept only this
+    /// briefly. Actively-writing sessions always fall within this window, so a
+    /// genuinely live session is never dropped even if process detection misses.
+    static let killedRetention: TimeInterval = 2 * 60
     /// Session files untouched for longer than this are not scanned at all.
     static let scanWindow: TimeInterval = doneRetention + 5 * 60
+
+    /// Whether a session should drop from the list this tick, given whether a
+    /// live process backs it. Live: done shows for `doneRetention`. Not live
+    /// (killed): anything shows for at most `killedRetention`.
+    static func shouldDrop(state: SessionState, alive: Bool, age: TimeInterval) -> Bool {
+        if !alive { return age > killedRetention }
+        return state == .done && age > doneRetention
+    }
 }

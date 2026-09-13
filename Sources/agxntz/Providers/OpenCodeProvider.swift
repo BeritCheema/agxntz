@@ -22,10 +22,12 @@ struct OpenCodeProvider: AgentProvider {
             [cutoffMs]
         )
 
-        let alive = processes.isRunning(kind)
         var sessions: [AgentSession] = []
         for row in sessionRows {
             guard let id = row[0] else { continue }
+            // A session is live only if an OpenCode process is running in its
+            // directory; otherwise a closed CLI leaves stale DB rows behind.
+            let alive = processes.isLive(kind, cwd: row[1])
             if let s = parse(db: db, id: id, directory: row[1], title: row[2],
                              createdMs: row[3], updatedMs: row[4], now: now, alive: alive) {
                 sessions.append(s)
@@ -88,8 +90,7 @@ struct OpenCodeProvider: AgentProvider {
             state = alive ? .working : .done // user message last: in-flight
         }
 
-        if state != .done && !alive { return nil }
-        if state == .done && age > Tuning.doneRetention { return nil }
+        if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
 
         // Latest assistant text part, for the dropdown message line.
         var lastText: String?
