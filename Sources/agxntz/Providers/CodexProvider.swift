@@ -85,14 +85,15 @@ struct CodexProvider: AgentProvider {
             switch lastKind {
             case "task_complete", "message":
                 state = .done
-            case "task_started":
-                state = age < 90 ? .working : (alive ? .waiting : .done)
             case "function_call":
                 // A call with no recorded output after the working window
                 // usually means an approval prompt is pending.
                 state = alive ? .waiting : .done
             default:
-                state = age < 90 ? .working : (alive ? .waiting : .done)
+                // task_started / reasoning / user / function_call_output: a
+                // turn is in flight and generation writes nothing until it
+                // produces output — working, not waiting.
+                state = alive ? .working : .done
             }
         }
 
@@ -116,7 +117,8 @@ struct CodexProvider: AgentProvider {
             id: "codex:\(sessionID)", kind: kind,
             projectName: (cwd ?? "codex").projectNameFromPath, cwd: cwd,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: mtime,
-            lastMessage: lastMessage?.messageSnippet
+            lastMessage: lastMessage?.messageSnippet,
+            debugInfo: "lastKind=\(lastKind ?? "nil") age=\(Int(age))s alive=\(alive)"
         )
     }
 }

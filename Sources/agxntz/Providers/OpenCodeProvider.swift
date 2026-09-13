@@ -66,7 +66,9 @@ struct OpenCodeProvider: AgentProvider {
         } else if lastRole == "assistant" && lastCompleted {
             state = .done
         } else {
-            state = age < 90 ? .working : (alive ? .waiting : .done)
+            // Turn in flight (user message last, or assistant not yet
+            // completed): working while the process lives.
+            state = alive ? .working : .done
         }
 
         if state != .done && !alive { return nil }
@@ -83,7 +85,8 @@ struct OpenCodeProvider: AgentProvider {
             id: "opencode:\(sessionID)", kind: kind,
             projectName: (directory ?? "opencode").projectNameFromPath, cwd: directory,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
-            lastMessage: lastText?.messageSnippet
+            lastMessage: lastText?.messageSnippet,
+            debugInfo: "lastRole=\(lastRole ?? "nil") completed=\(lastCompleted) age=\(Int(age))s alive=\(alive)"
         )
     }
 

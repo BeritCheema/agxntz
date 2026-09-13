@@ -45,7 +45,10 @@ final class SessionStore: ObservableObject {
             let result = collected
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result != self.sessions { self.sessions = result }
+                if result != self.sessions {
+                    self.logTransitions(from: self.sessions, to: result)
+                    self.sessions = result
+                }
                 // Drop pins whose sessions no longer exist.
                 let live = Set(result.map(\.id))
                 let kept = self.pinnedIDs.filter(live.contains)
@@ -82,6 +85,23 @@ final class SessionStore: ObservableObject {
             pins.append(id)
         }
         setPins(pins)
+    }
+
+    private func logTransitions(from old: [AgentSession], to new: [AgentSession]) {
+        guard Log.enabled else { return }
+        let oldByID = Dictionary(uniqueKeysWithValues: old.map { ($0.id, $0) })
+        let newIDs = Set(new.map(\.id))
+        for session in new {
+            let previous = oldByID[session.id]
+            if previous == nil {
+                Log.d("+ \(session.id) [\(session.projectName)] \(session.state) '\(session.activity)' (\(session.debugInfo ?? "-"))")
+            } else if previous?.state != session.state || previous?.activity != session.activity {
+                Log.d("~ \(session.id) [\(session.projectName)] \(previous!.state)->\(session.state) '\(session.activity)' (\(session.debugInfo ?? "-"))")
+            }
+        }
+        for session in old where !newIDs.contains(session.id) {
+            Log.d("- \(session.id) [\(session.projectName)] removed (was \(session.state))")
+        }
     }
 
     private func setPins(_ pins: [String]) {

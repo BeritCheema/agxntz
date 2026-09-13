@@ -37,6 +37,15 @@ struct AgentSession: Identifiable, Equatable {
     let startedAt: Date
     let lastActivityAt: Date  // for done sessions, when the turn finished
     var lastMessage: String? = nil  // latest agent-authored text, for the dropdown
+    var debugInfo: String? = nil    // why the provider chose this state (--debug)
+
+    // debugInfo carries per-tick details (ages etc.) and must not make two
+    // otherwise-identical snapshots unequal, or the UI would churn every tick.
+    static func == (lhs: AgentSession, rhs: AgentSession) -> Bool {
+        lhs.id == rhs.id && lhs.state == rhs.state && lhs.activity == rhs.activity
+            && lhs.projectName == rhs.projectName && lhs.startedAt == rhs.startedAt
+            && lhs.lastActivityAt == rhs.lastActivityAt && lhs.lastMessage == rhs.lastMessage
+    }
 }
 
 extension String {

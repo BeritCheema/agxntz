@@ -3,6 +3,10 @@ import Foundation
 
 let arguments = CommandLine.arguments
 
+Log.enabled = arguments.contains("--debug")
+    || arguments.contains("--scan")
+    || ProcessInfo.processInfo.environment["AGXNTZ_DEBUG"] == "1"
+
 // Hook mode: called by Claude Code hooks; append the event and exit.
 if let flagIndex = arguments.firstIndex(of: "--claude-hook"), arguments.count > flagIndex + 1 {
     ClaudeHookInstaller.runHookMode(event: arguments[flagIndex + 1])
@@ -30,7 +34,7 @@ if arguments.contains("--scan") {
     ]
     for provider in providers {
         for s in provider.scan(now: now, processes: processes) {
-            print("[\(s.kind.rawValue)] \(s.projectName) — \(s.state) — \(s.activity) — started \(s.elapsedText) ago — id \(s.id)")
+            print("[\(s.kind.rawValue)] \(s.projectName) — \(s.state) — \(s.activity) — started \(s.elapsedText) ago — id \(s.id) — \(s.debugInfo ?? "")")
         }
     }
     exit(0)
@@ -42,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Log.d("agxntz launched (pid \(ProcessInfo.processInfo.processIdentifier)), debug logging on")
         store = SessionStore()
         statusBar = StatusBarController(store: store)
         store.start()

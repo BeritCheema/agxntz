@@ -112,7 +112,8 @@ struct ClaudeCodeProvider: AgentProvider {
         return AgentSession(
             id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
-            lastMessage: lastAssistantText?.messageSnippet
+            lastMessage: lastAssistantText?.messageSnippet,
+            debugInfo: "lastType=\(lastMeaningful?["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive) hook=\(hookEvent?.event ?? "none")"
         )
     }
 
@@ -134,9 +135,11 @@ struct ClaudeCodeProvider: AgentProvider {
             if contentTypes(of: lastRecord).contains("tool_use") { return .waiting }
             return .done // finished its turn with a text reply
         }
-        // Last record is user input or a tool result with no reply for a
-        // while: treat short gaps as still working, long ones as waiting.
-        return age < 90 ? .working : (alive ? .waiting : .done)
+        // Last record is user input or a tool result: the assistant owes a
+        // response. Generation (thinking, long replies) can run for minutes
+        // without a single transcript write, so this is WORKING no matter
+        // how old the last write is — never "waiting".
+        return alive ? .working : .done
     }
 
     /// True for records representing an actual typed user prompt, as opposed
