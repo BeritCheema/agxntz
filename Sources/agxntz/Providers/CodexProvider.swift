@@ -31,7 +31,7 @@ struct CodexProvider: AgentProvider {
         let sessionID = payload["id"] as? String ?? file.deletingPathExtension().lastPathComponent
         let startedAt = (meta["timestamp"] as? String).flatMap(ISO8601.parse) ?? mtime
 
-        var lastKind: String?     // reasoning | message | function_call | function_call_output | user
+        var lastKind: String?     // task_complete | task_started | reasoning | message | function_call | function_call_output | user
         var lastToolName: String?
         for line in FileUtil.tailLines(of: file).reversed() {
             guard let obj = FileUtil.json(line),
@@ -39,22 +39,33 @@ struct CodexProvider: AgentProvider {
             guard type == "response_item" || type == "event_msg" else { continue }
             guard let p = obj["payload"] as? [String: Any],
                   let pType = p["type"] as? String else { continue }
-            if type == "response_item" {
-                switch pType {
-                case "message":
-                    lastKind = (p["role"] as? String) == "assistant" ? "message" : "user"
-                case "function_call", "local_shell_call", "custom_tool_call":
-                    lastKind = "function_call"
-                    lastToolName = p["name"] as? String
-                case "function_call_output", "local_shell_call_output", "custom_tool_call_output":
-                    lastKind = "function_call_output"
-                case "reasoning":
-                    lastKind = "reasoning"
-                default:
-                    continue
+            if type == "event_msg" {
+                // Newer Codex writes explicit turn lifecycle events; they are
+                // the most reliable signal when they trail the transcript.
+                if pType == "task_complete" || pType == "turn_aborted" {
+                    lastKind = "task_complete"
+                    break
                 }
-                break
+                if pType == "task_started" {
+                    lastKind = "task_started"
+                    break
+                }
+                continue
             }
+            switch pType {
+            case "message":
+                lastKind = (p["role"] as? String) == "assistant" ? "message" : "user"
+            case "function_call", "local_shell_call", "custom_tool_call":
+                lastKind = "function_call"
+                lastToolName = p["name"] as? String
+            case "function_call_output", "local_shell_call_output", "custom_tool_call_output":
+                lastKind = "function_call_output"
+            case "reasoning":
+                lastKind = "reasoning"
+            default:
+                continue
+            }
+            break
         }
 
         let age = now.timeIntervalSince(mtime)
@@ -65,8 +76,10 @@ struct CodexProvider: AgentProvider {
             state = .working
         } else {
             switch lastKind {
-            case "message":
+            case "task_complete", "message":
                 state = .done
+            case "task_started":
+                state = age < 90 ? .working : (alive ? .waiting : .done)
             case "function_call":
                 // A call with no recorded output after the working window
                 // usually means an approval prompt is pending.

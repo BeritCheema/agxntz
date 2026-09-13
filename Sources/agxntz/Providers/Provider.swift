@@ -52,12 +52,25 @@ enum FileUtil {
         return lines
     }
 
-    static func firstLine(of url: URL, maxBytes: Int = 16 * 1024) -> String? {
+    /// First complete line of a file. Reads in growing chunks: some agents
+    /// write very large metadata first lines (Codex embeds its full base
+    /// instructions, >18KB), so a fixed small read would truncate mid-line
+    /// and break JSON parsing.
+    static func firstLine(of url: URL, capBytes: Int = 4 * 1024 * 1024) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: maxBytes),
-              let text = String(data: data, encoding: .utf8) else { return nil }
-        return text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
+        var buffer = Data()
+        var chunkSize = 16 * 1024
+        while buffer.count < capBytes {
+            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
+            buffer.append(chunk)
+            if buffer.contains(UInt8(ascii: "\n")) { break }
+            chunkSize *= 2
+        }
+        guard let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) else {
+            return buffer.isEmpty ? nil : String(data: buffer, encoding: .utf8)
+        }
+        return String(data: buffer[..<newline], encoding: .utf8)
     }
 
     static func json(_ line: String) -> [String: Any]? {
