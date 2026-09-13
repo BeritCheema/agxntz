@@ -1,0 +1,57 @@
+import AppKit
+import Foundation
+
+let arguments = CommandLine.arguments
+
+// Hook mode: called by Claude Code hooks; append the event and exit.
+if let flagIndex = arguments.firstIndex(of: "--claude-hook"), arguments.count > flagIndex + 1 {
+    ClaudeHookInstaller.runHookMode(event: arguments[flagIndex + 1])
+    exit(0)
+}
+
+// Install Claude Code hooks from the command line.
+if arguments.contains("--install-claude-hooks") {
+    do {
+        try ClaudeHookInstaller.install()
+        print("Claude Code hooks installed (shim: \(ClaudeHookInstaller.shimPath.path))")
+        exit(0)
+    } catch {
+        FileHandle.standardError.write(Data("hook install failed: \(error)\n".utf8))
+        exit(1)
+    }
+}
+
+// Debug mode: one detection pass, printed to stdout.
+if arguments.contains("--scan") {
+    let now = Date()
+    let processes = ProcessSnapshot.capture()
+    let providers: [AgentProvider] = [
+        ClaudeCodeProvider(), CodexProvider(), OpenCodeProvider(), GrokProvider(), PiProvider(),
+    ]
+    for provider in providers {
+        for s in provider.scan(now: now, processes: processes) {
+            print("[\(s.kind.rawValue)] \(s.projectName) — \(s.state) — \(s.activity) — started \(s.elapsedText) ago — id \(s.id)")
+        }
+    }
+    exit(0)
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var store: SessionStore!
+    private var statusBar: StatusBarController!
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        store = SessionStore()
+        statusBar = StatusBarController(store: store)
+        store.start()
+    }
+}
+
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory) // menu-bar only, no Dock icon
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.run()
+}
