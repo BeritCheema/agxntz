@@ -83,9 +83,19 @@ struct CounterView: View {
     }
 }
 
-/// Menu-bar content for a pinned session: dot + live activity only.
+/// Menu-bar content for a pinned session: state dot + a scrolling ticker of
+/// exactly what the agent is doing right now (its activity, plus its latest
+/// message for context) — like a news headline scan.
 struct PinnedItemView: View {
     let session: AgentSession
+    private let tickerWidth: CGFloat = 150
+
+    private var scanText: String {
+        if let message = session.lastMessage, !message.isEmpty, message != session.activity {
+            return "\(session.activity) — \(message)"
+        }
+        return session.activity
+    }
 
     var body: some View {
         Group {
@@ -97,12 +107,7 @@ struct PinnedItemView: View {
             } else {
                 HStack(spacing: 5) {
                     Circle().fill(session.state.color).frame(width: 8, height: 8)
-                    Text(session.activity)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 140)
-                        .fixedSize(horizontal: true, vertical: false)
+                    MarqueeText(text: scanText, width: tickerWidth)
                 }
             }
         }
@@ -110,6 +115,58 @@ struct PinnedItemView: View {
         .frame(height: 22)
         .fixedSize()
     }
+}
+
+/// Horizontally scrolling single-line text (a marquee/ticker). Scrolls only
+/// when the text is wider than `width`; otherwise it sits static. Driven by a
+/// TimelineView so it keeps scrolling smoothly even as the hosting view is
+/// refreshed each tick.
+struct MarqueeText: View {
+    let text: String
+    let width: CGFloat
+    var fontSize: CGFloat = 12
+    var speed: Double = 30          // points per second
+    private let gap: CGFloat = 40   // space between the repeated copies
+
+    @State private var textWidth: CGFloat = 0
+
+    var body: some View {
+        let font = Font.system(size: fontSize)
+        let scrolls = textWidth > width + 0.5
+        return Group {
+            if scrolls {
+                TimelineView(.animation(minimumInterval: 0.04)) { timeline in
+                    let period = textWidth + gap
+                    let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                    let x = -CGFloat((elapsed * speed).truncatingRemainder(dividingBy: Double(period)))
+                    HStack(spacing: gap) {
+                        Text(text).font(font).fixedSize()
+                        Text(text).font(font).fixedSize()
+                    }
+                    .offset(x: x)
+                    .frame(width: width, alignment: .leading)
+                    .clipped()
+                }
+            } else {
+                Text(text).font(font).lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+            }
+        }
+        .frame(width: width, height: 22)
+        .background(
+            // Measure the text's intrinsic width off-screen.
+            Text(text).font(font).fixedSize().hidden()
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: MarqueeWidthKey.self, value: g.size.width)
+                })
+        )
+        .onPreferenceChange(MarqueeWidthKey.self) { textWidth = $0 }
+    }
+}
+
+private struct MarqueeWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// The dropdown: straight into Working / Waiting / Done groups, empty groups omitted.
