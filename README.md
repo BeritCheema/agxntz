@@ -36,7 +36,7 @@ transcript-tail parsing with a process-liveness check (`ps`), polled every 2s.
 - **done** — assistant finished its turn with a text reply (debounced 30s to
   avoid flagging mid-turn status text)
 
-### Sub-agents (Claude Code)
+### Sub-agents (Claude Code & Codex)
 
 When a Claude session spawns sub-agents, Claude Code writes each one's
 transcript to `~/.claude/projects/<cwd>/<session-id>/subagents/agent-<id>.jsonl`.
@@ -46,6 +46,11 @@ nested list under the parent showing each sub-agent's live activity and
 elapsed time; each nested row has its own pin button to promote that
 sub-agent to the menu bar. Sub-agents do not count toward the aggregate
 menu-bar counters, and they drop from the list shortly after finishing.
+
+Codex sub-agents work the same way: a spawned Codex sub-agent gets its own
+rollout file whose `session_meta` carries `parent_thread_id` and an
+`agent_nickname`. agxntz nests it under the parent Codex session (labeled by
+nickname, e.g. "Cicero") instead of listing it as a separate Codex agent.
 
 ### Liveness & retention
 

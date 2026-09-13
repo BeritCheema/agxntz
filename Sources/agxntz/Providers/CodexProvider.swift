@@ -7,22 +7,48 @@ struct CodexProvider: AgentProvider {
     private let sessionsDir = FileUtil.home.appendingPathComponent(".codex/sessions")
 
     func scan(now: Date, processes: ProcessSnapshot) -> [AgentSession] {
-        var sessions: [AgentSession] = []
+        var parents: [AgentSession] = []
+        var subsByParent: [String: [AgentSession]] = [:]
+
         for yearDir in FileUtil.subdirectories(of: sessionsDir) {
             for monthDir in FileUtil.subdirectories(of: yearDir) {
                 for dayDir in FileUtil.subdirectories(of: monthDir) {
                     for (file, mtime) in FileUtil.recentFiles(in: dayDir, suffix: ".jsonl", now: now) {
-                        if let s = parse(file: file, mtime: mtime, now: now, processes: processes) {
-                            sessions.append(s)
+                        guard let parsed = parse(file: file, mtime: mtime, now: now, processes: processes) else { continue }
+                        if let parentID = parsed.parentThreadID {
+                            subsByParent[parentID, default: []].append(parsed.session)
+                        } else {
+                            parents.append(parsed.session)
                         }
                     }
                 }
             }
         }
-        return sessions
+
+        // Attach each sub-agent to its parent session; keep orphans (parent no
+        // longer present) as top-level so they aren't lost.
+        var result: [AgentSession] = []
+        for var parent in parents {
+            let parentThreadID = parent.id.replacingOccurrences(of: "codex:", with: "")
+            if let subs = subsByParent.removeValue(forKey: parentThreadID) {
+                parent.subAgents = subs.sorted {
+                    $0.state == $1.state ? $0.lastActivityAt > $1.lastActivityAt : $0.state < $1.state
+                }
+            }
+            result.append(parent)
+        }
+        for orphan in subsByParent.values.flatMap({ $0 }) {
+            result.append(orphan)
+        }
+        return result
     }
 
-    private func parse(file: URL, mtime: Date, now: Date, processes: ProcessSnapshot) -> AgentSession? {
+    private struct ParsedSession {
+        let session: AgentSession
+        let parentThreadID: String?
+    }
+
+    private func parse(file: URL, mtime: Date, now: Date, processes: ProcessSnapshot) -> ParsedSession? {
         guard let firstLine = FileUtil.firstLine(of: file),
               let meta = FileUtil.json(firstLine),
               (meta["type"] as? String) == "session_meta" else { return nil }
@@ -30,6 +56,12 @@ struct CodexProvider: AgentProvider {
         let cwd = payload["cwd"] as? String
         let sessionID = payload["id"] as? String ?? file.deletingPathExtension().lastPathComponent
         let startedAt = (meta["timestamp"] as? String).flatMap(ISO8601.parse) ?? mtime
+
+        // A sub-agent rollout carries its parent thread id and a nickname in
+        // source.subagent.thread_spawn (also mirrored as top-level parent_thread_id).
+        let parentThreadID = payload["parent_thread_id"] as? String
+            ?? ((((payload["source"] as? [String: Any])?["subagent"] as? [String: Any])?["thread_spawn"] as? [String: Any])?["parent_thread_id"] as? String)
+        let nickname = (((payload["source"] as? [String: Any])?["subagent"] as? [String: Any])?["thread_spawn"] as? [String: Any])?["agent_nickname"] as? String
 
         var lastKind: String?     // task_complete | task_started | reasoning | message | function_call | function_call_output | user
         var lastToolName: String?
@@ -112,12 +144,19 @@ struct CodexProvider: AgentProvider {
             }
         }
 
-        return AgentSession(
-            id: "codex:\(sessionID)", kind: kind,
-            projectName: (cwd ?? "codex").projectNameFromPath, cwd: cwd,
+        // Sub-agents are labeled by nickname; a sub-agent's id is namespaced
+        // so it can be pinned/resolved distinctly from top-level sessions.
+        let isSub = parentThreadID != nil
+        let idPrefix = isSub ? "codex-sub" : "codex"
+        let project = nickname ?? (cwd ?? "codex").projectNameFromPath
+
+        let session = AgentSession(
+            id: "\(idPrefix):\(sessionID)", kind: kind,
+            projectName: project, cwd: cwd,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: mtime,
             lastMessage: lastMessage?.messageSnippet,
-            debugInfo: "lastKind=\(lastKind ?? "nil") age=\(Int(age))s alive=\(alive)"
+            debugInfo: "lastKind=\(lastKind ?? "nil") age=\(Int(age))s alive=\(alive)\(isSub ? " sub" : "")"
         )
+        return ParsedSession(session: session, parentThreadID: parentThreadID)
     }
 }

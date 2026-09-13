@@ -99,8 +99,17 @@ struct ClaudeCodeProvider: AgentProvider {
         // long-done session back to green for a few seconds.
         let isTurnEndMarker = (lastMeaningful["type"] as? String) == "system"
 
+        // A trailing AskUserQuestion is an interactive prompt blocked on the
+        // user's answer — unambiguously "waiting" the instant it appears, so
+        // it must bypass the "recent write = working" shortcut (otherwise the
+        // question reads green for its first seconds, or longer).
+        let pendingQuestion = (lastMeaningful["type"] as? String) == "assistant"
+            && Self.lastToolName(lastMeaningful) == "AskUserQuestion"
+
         var state: SessionState
-        if age < Tuning.workingWindow && !isTurnEndMarker {
+        if pendingQuestion {
+            state = .waiting
+        } else if age < Tuning.workingWindow && !isTurnEndMarker {
             state = .working
         } else {
             state = Self.heuristicState(lastRecord: lastMeaningful, age: age, alive: alive)
@@ -269,6 +278,13 @@ struct ClaudeCodeProvider: AgentProvider {
         return Set(content.compactMap { $0["type"] as? String })
     }
 
+    /// Name of the last tool_use in a record's content, if any.
+    private static func lastToolName(_ record: [String: Any]) -> String? {
+        guard let message = record["message"] as? [String: Any],
+              let content = message["content"] as? [[String: Any]] else { return nil }
+        return content.last { $0["type"] as? String == "tool_use" }?["name"] as? String
+    }
+
     private static func activity(state: SessionState, lastAssistant: [String: Any]?) -> String {
         if state == .done { return "finished" }
         guard let assistant = lastAssistant,
@@ -279,6 +295,14 @@ struct ClaudeCodeProvider: AgentProvider {
         if let toolUse = content.last(where: { $0["type"] as? String == "tool_use" }),
            let name = toolUse["name"] as? String {
             let input = toolUse["input"] as? [String: Any] ?? [:]
+            // Interactive question: show the question itself, not "wants to …".
+            if name == "AskUserQuestion" {
+                if let questions = input["questions"] as? [[String: Any]],
+                   let q = questions.first?["question"] as? String, !q.isEmpty {
+                    return q
+                }
+                return "asking you a question"
+            }
             let described = describeTool(name: name, input: input)
             return state == .waiting ? "wants to \(described)" : described
         }
