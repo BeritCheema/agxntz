@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 extension SessionState {
     var color: Color {
@@ -118,9 +119,13 @@ struct PinnedItemView: View {
 }
 
 /// Horizontally scrolling single-line text (a marquee/ticker). Scrolls only
-/// when the text is wider than `width`; otherwise it sits static. Driven by a
-/// TimelineView so it keeps scrolling smoothly even as the hosting view is
-/// refreshed each tick.
+/// when the text is wider than `width`; otherwise it sits static.
+///
+/// The scroll position is a pure function of wall-clock time, and the text
+/// width is measured synchronously — no `@State`. That way rebuilding this
+/// view (which the menu-bar item does whenever data is polled) can never
+/// briefly reset the ticker to the base position; identical text keeps
+/// scrolling seamlessly across rebuilds.
 struct MarqueeText: View {
     let text: String
     let width: CGFloat
@@ -128,45 +133,32 @@ struct MarqueeText: View {
     var speed: Double = 30          // points per second
     private let gap: CGFloat = 40   // space between the repeated copies
 
-    @State private var textWidth: CGFloat = 0
+    private var textWidth: CGFloat {
+        let nsFont = NSFont.systemFont(ofSize: fontSize)
+        return ceil((text as NSString).size(withAttributes: [.font: nsFont]).width)
+    }
 
     var body: some View {
         let font = Font.system(size: fontSize)
-        let scrolls = textWidth > width + 0.5
-        return Group {
-            if scrolls {
-                TimelineView(.animation(minimumInterval: 0.04)) { timeline in
-                    let period = textWidth + gap
-                    let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                    let x = -CGFloat((elapsed * speed).truncatingRemainder(dividingBy: Double(period)))
-                    HStack(spacing: gap) {
-                        Text(text).font(font).fixedSize()
-                        Text(text).font(font).fixedSize()
-                    }
-                    .offset(x: x)
-                    .frame(width: width, alignment: .leading)
-                    .clipped()
+        let tw = textWidth
+        if tw <= width + 0.5 {
+            Text(text).font(font).lineLimit(1)
+                .frame(width: width, height: 22, alignment: .leading)
+        } else {
+            let period = Double(tw + gap)
+            TimelineView(.animation(minimumInterval: 0.04)) { timeline in
+                let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                let x = -CGFloat((elapsed * speed).truncatingRemainder(dividingBy: period))
+                HStack(spacing: gap) {
+                    Text(text).font(font).fixedSize()
+                    Text(text).font(font).fixedSize()
                 }
-            } else {
-                Text(text).font(font).lineLimit(1)
-                    .frame(width: width, alignment: .leading)
+                .offset(x: x)
+                .frame(width: width, height: 22, alignment: .leading)
+                .clipped()
             }
         }
-        .frame(width: width, height: 22)
-        .background(
-            // Measure the text's intrinsic width off-screen.
-            Text(text).font(font).fixedSize().hidden()
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: MarqueeWidthKey.self, value: g.size.width)
-                })
-        )
-        .onPreferenceChange(MarqueeWidthKey.self) { textWidth = $0 }
     }
-}
-
-private struct MarqueeWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// The dropdown: straight into Working / Waiting / Done groups, empty groups omitted.

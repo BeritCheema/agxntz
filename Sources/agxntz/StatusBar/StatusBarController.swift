@@ -7,6 +7,7 @@ final class StatusBarController: NSObject {
     private let store: SessionStore
     private var aggregateItem: NSStatusItem?
     private var pinnedItems: [String: NSStatusItem] = [:]
+    private var pinnedRendered: [String: AgentSession] = [:]  // last session rendered per pin
     private var panel: DropdownPanel?
     private var cancellables = Set<AnyCancellable>()
 
@@ -52,16 +53,31 @@ final class StatusBarController: NSObject {
         for (id, item) in pinnedItems where !wanted.contains(id) {
             NSStatusBar.system.removeStatusItem(item)
             pinnedItems.removeValue(forKey: id)
+            pinnedRendered.removeValue(forKey: id)
         }
         for session in pinned {
             if let item = pinnedItems[session.id] {
-                swapHostedView(of: item, rootView: AnyView(PinnedItemView(session: session)))
+                // Only rebuild the hosted view when what the pinned item
+                // *shows* changed (state, activity, message). Ignoring e.g.
+                // lastActivityAt ticks keeps the SwiftUI subtree — and its
+                // scrolling ticker — alive and smooth across polls.
+                if !Self.sameDisplay(pinnedRendered[session.id], session) {
+                    swapHostedView(of: item, rootView: AnyView(PinnedItemView(session: session)))
+                    pinnedRendered[session.id] = session
+                }
             } else {
                 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 configure(item: item, rootView: AnyView(PinnedItemView(session: session)))
                 pinnedItems[session.id] = item
+                pinnedRendered[session.id] = session
             }
         }
+    }
+
+    /// Whether two sessions render identically as a pinned menu-bar item.
+    private static func sameDisplay(_ a: AgentSession?, _ b: AgentSession) -> Bool {
+        guard let a else { return false }
+        return a.state == b.state && a.activity == b.activity && a.lastMessage == b.lastMessage
     }
 
     private func configure(item: NSStatusItem, rootView: AnyView) {
