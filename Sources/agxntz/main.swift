@@ -30,7 +30,8 @@ if arguments.contains("--scan") {
     let now = Date()
     let processes = ProcessSnapshot.capture()
     let providers: [AgentProvider] = [
-        ClaudeCodeProvider(), CodexProvider(), OpenCodeProvider(), GrokProvider(), PiProvider(),
+        ClaudeCodeProvider(), CodexProvider(), OpenCodeProvider(), GrokProvider(),
+        PiFamilyProvider.pi(), PiFamilyProvider.omp(),
     ]
     for provider in providers {
         for s in provider.scan(now: now, processes: processes) {

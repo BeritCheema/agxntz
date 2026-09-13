@@ -43,35 +43,6 @@ struct GrokProvider: AgentProvider {
     }
 }
 
-/// Pi (badlogic/pi-mono): tree-structured JSONL sessions under
-/// ~/.pi/agent/sessions/, grouped by working directory
-/// (override with PI_CODING_AGENT_SESSION_DIR).
-struct PiProvider: AgentProvider {
-    let kind = AgentKind.pi
-
-    private var sessionsDir: URL {
-        if let base = ProcessInfo.processInfo.environment["PI_CODING_AGENT_SESSION_DIR"] {
-            return URL(fileURLWithPath: base)
-        }
-        return FileUtil.home.appendingPathComponent(".pi/agent/sessions")
-    }
-
-    func scan(now: Date, processes: ProcessSnapshot) -> [AgentSession] {
-        var sessions: [AgentSession] = []
-        for groupDir in FileUtil.subdirectories(of: sessionsDir) {
-            // Group dirs encode the cwd with dashes (like Claude Code).
-            let cwd = groupDir.lastPathComponent.replacingOccurrences(of: "-", with: "/")
-            for (file, mtime) in FileUtil.recentFiles(in: groupDir, suffix: ".jsonl", now: now) {
-                if let s = GenericTailClassifier.session(
-                    idPrefix: "pi", kind: kind, file: file, mtime: mtime, cwd: cwd,
-                    now: now, processes: processes
-                ) { sessions.append(s) }
-            }
-        }
-        return sessions
-    }
-}
-
 /// Best-effort state classification for agents whose transcript format we
 /// don't parse structurally: look at the raw last JSONL line for
 /// role/tool-call markers, otherwise fall back to mtime + process liveness.

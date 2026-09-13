@@ -6,6 +6,7 @@ enum AgentKind: String, CaseIterable, Codable {
     case grok = "Grok"
     case opencode = "OpenCode"
     case pi = "Pi"
+    case omp = "Oh My Pi"
 
     /// Executable basenames that indicate this agent is running.
     var processNames: [String] {
@@ -15,6 +16,15 @@ enum AgentKind: String, CaseIterable, Codable {
         case .grok: return ["grok"]
         case .opencode: return ["opencode"]
         case .pi: return ["pi"]
+        case .omp: return ["omp"]
+        }
+    }
+
+    /// Stable prefix for session ids (display names can have spaces).
+    var idPrefix: String {
+        switch self {
+        case .omp: return "omp"
+        default: return rawValue.lowercased()
         }
     }
 }

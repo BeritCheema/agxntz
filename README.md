@@ -21,7 +21,8 @@ get their own menu-bar item showing a colored dot plus the live activity text.
 | Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | good |
 | OpenCode | `~/.local/share/opencode/storage/{session,message}` | good |
 | Grok CLI | `~/.grok/sessions/` (`GROK_HOME` honored) | heuristic |
-| pi | `~/.pi/agent/sessions/` (`PI_CODING_AGENT_SESSION_DIR` honored) | heuristic |
+| pi | `~/.pi/agent/sessions/` (`PI_CODING_AGENT_SESSION_DIR` honored) | good |
+| Oh My Pi | `~/.omp/agent/sessions/` | good |
 
 Everything is read-only: agxntz never modifies agent data. Detection combines
 transcript-tail parsing with a process-liveness check (`ps`), polled every 2s.

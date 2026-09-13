@@ -11,7 +11,8 @@ final class SessionStore: ObservableObject {
         CodexProvider(),
         OpenCodeProvider(),
         GrokProvider(),
-        PiProvider(),
+        PiFamilyProvider.pi(),
+        PiFamilyProvider.omp(),
     ]
     private var timer: Timer?
     private let pinsKey = "agxntz.pinnedSessionIDs"
