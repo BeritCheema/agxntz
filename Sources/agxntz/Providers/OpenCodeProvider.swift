@@ -57,10 +57,13 @@ struct OpenCodeProvider: AgentProvider {
         // OpenCode auto-runs within its granted permissions.
         var toolRunning = false
         var toolName: String?
+        var questionPrompt: String?
         if role == "assistant" {
             let toolRows = db.query(
                 """
-                SELECT json_extract(data,'$.tool'), json_extract(data,'$.state.status')
+                SELECT json_extract(data,'$.tool'), json_extract(data,'$.state.status'),
+                       json_extract(data,'$.state.input.questions[0].question'),
+                       json_extract(data,'$.state.input.questions[0].header')
                 FROM part
                 WHERE message_id = ? AND json_extract(data,'$.type') = 'tool'
                 ORDER BY time_created DESC LIMIT 1
@@ -70,14 +73,21 @@ struct OpenCodeProvider: AgentProvider {
             if let tool = toolRows.first {
                 toolName = tool[0]
                 toolRunning = ["running", "pending"].contains(tool[1] ?? "")
+                if toolName == "question" { questionPrompt = tool[2] ?? tool[3] }
             }
         }
+        // OpenCode's `question` tool is its interactive multiple-choice prompt.
+        // A running one is blocked on the user's answer — not work in progress —
+        // so it's a genuine "waiting for you", not green/working or blue/done.
+        let awaitingQuestion = toolName == "question" && toolRunning
 
         let lastActivity = Self.msDate(updatedMs) ?? now
         let age = now.timeIntervalSince(lastActivity)
 
         var state: SessionState
-        if age < Tuning.workingWindow {
+        if awaitingQuestion {
+            state = .waiting
+        } else if age < Tuning.workingWindow {
             state = .working
         } else if role == "assistant" {
             // During live generation OpenCode streams parts, bumping the
@@ -108,7 +118,9 @@ struct OpenCodeProvider: AgentProvider {
         let activity: String
         switch state {
         case .done: activity = "finished"
-        case .waiting: activity = "waiting for you"
+        case .waiting:
+            if let questionPrompt, !questionPrompt.isEmpty { activity = questionPrompt }
+            else { activity = "waiting for your answer" }
         case .working:
             if toolRunning, let toolName { activity = "running \(toolName)" }
             else if let title, !title.isEmpty, !title.hasPrefix("New session") { activity = title }
@@ -121,7 +133,7 @@ struct OpenCodeProvider: AgentProvider {
             activity: activity, state: state,
             startedAt: Self.msDate(createdMs) ?? lastActivity, lastActivityAt: lastActivity,
             lastMessage: lastText?.messageSnippet,
-            debugInfo: "role=\(role ?? "nil") toolRunning=\(toolRunning) completed=\(completed) age=\(Int(age))s alive=\(alive)"
+            debugInfo: "role=\(role ?? "nil") tool=\(toolName ?? "-") running=\(toolRunning) question=\(awaitingQuestion) completed=\(completed) age=\(Int(age))s alive=\(alive)"
         )
     }
 
