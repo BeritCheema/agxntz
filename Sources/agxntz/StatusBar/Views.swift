@@ -18,25 +18,66 @@ extension SessionState {
     }
 }
 
-/// Menu-bar content: one colored dot + count per non-empty state. Nothing else.
+/// Clustered dots for a state's count: 1 = a single dot, 2 = two stacked
+/// vertically, 3 = a triangle, 4+ = one dot + the number.
+struct StateCluster: View {
+    let color: Color
+    let count: Int
+
+    private let dot: CGFloat = 6
+    // Center-to-center offset that leaves a hair of gap between dots.
+    private var r: CGFloat { dot / 2 + 1.5 }
+
+    var body: some View {
+        switch count {
+        case 1:
+            cluster(width: dot, height: dot) { [(0, 0)] }
+        case 2:
+            cluster(width: dot, height: dot + 2 * r) { [(0, -r), (0, r)] }
+        case 3:
+            // Apex up, two dots on the base.
+            cluster(width: 2 * r + dot, height: 2 * r + dot) {
+                [(0, -r), (-r, r), (r, r)]
+            }
+        default:
+            HStack(spacing: 4) {
+                circle
+                Text("\(count)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private var circle: some View {
+        Circle().fill(color).frame(width: dot, height: dot)
+    }
+
+    private func cluster(width: CGFloat, height: CGFloat,
+                         offsets: () -> [(CGFloat, CGFloat)]) -> some View {
+        ZStack {
+            ForEach(Array(offsets().enumerated()), id: \.offset) { _, pos in
+                circle.offset(x: pos.0, y: pos.1)
+            }
+        }
+        .frame(width: width, height: height)
+    }
+}
+
+/// Menu-bar content: one clustered-dot group per non-empty state. Nothing else.
 struct CounterView: View {
     @ObservedObject var store: SessionStore
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             ForEach([SessionState.working, .waiting, .done], id: \.rawValue) { state in
                 let count = store.unpinnedCount(of: state)
                 if count > 0 {
-                    HStack(spacing: 4) {
-                        Circle().fill(state.color).frame(width: 8, height: 8)
-                        Text("\(count)")
-                            .font(.system(size: 12, weight: .semibold))
-                            .monospacedDigit()
-                    }
+                    StateCluster(color: state.color, count: count)
                 }
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 7)
         .frame(height: 22)
         .fixedSize()
     }
