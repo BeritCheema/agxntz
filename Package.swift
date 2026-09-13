@@ -7,7 +7,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "agxntz",
-            path: "Sources/agxntz"
+            path: "Sources/agxntz",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         )
     ]
 )

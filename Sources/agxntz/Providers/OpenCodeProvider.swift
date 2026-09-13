@@ -1,108 +1,131 @@
 import Foundation
 
-/// OpenCode: session metadata at
-/// ~/.local/share/opencode/storage/session/<project-hash>/ses_*.json,
-/// with messages under storage/message/<session-id>/.
+/// OpenCode (current versions): sessions live in a SQLite database at
+/// ~/.local/share/opencode/opencode.db (WAL mode). Tables: `session`
+/// (top-level when parent_id IS NULL), `message` (role + time in JSON `data`),
+/// and `part` (text/tool parts, tool status in `data`).
 struct OpenCodeProvider: AgentProvider {
     let kind = AgentKind.opencode
-    private let storageDir = FileUtil.home.appendingPathComponent(".local/share/opencode/storage")
+    private let dbPath = FileUtil.home
+        .appendingPathComponent(".local/share/opencode/opencode.db").path
 
     func scan(now: Date, processes: ProcessSnapshot) -> [AgentSession] {
+        guard let db = SQLiteDB(readonlyPath: dbPath) else { return [] }
+        let cutoffMs = String(Int((now.timeIntervalSince1970 - Tuning.scanWindow) * 1000))
+        let sessionRows = db.query(
+            """
+            SELECT id, directory, title, time_created, time_updated
+            FROM session
+            WHERE parent_id IS NULL AND time_updated > ?
+            ORDER BY time_updated DESC
+            """,
+            [cutoffMs]
+        )
+
+        let alive = processes.isRunning(kind)
         var sessions: [AgentSession] = []
-        let sessionRoot = storageDir.appendingPathComponent("session")
-        for projectDir in FileUtil.subdirectories(of: sessionRoot) {
-            for (file, mtime) in FileUtil.recentFiles(in: projectDir, suffix: ".json", now: now) {
-                if let s = parse(file: file, metaMtime: mtime, now: now, processes: processes) {
-                    sessions.append(s)
-                }
+        for row in sessionRows {
+            guard let id = row[0] else { continue }
+            if let s = parse(db: db, id: id, directory: row[1], title: row[2],
+                             createdMs: row[3], updatedMs: row[4], now: now, alive: alive) {
+                sessions.append(s)
             }
         }
         return sessions
     }
 
-    private func parse(file: URL, metaMtime: Date, now: Date, processes: ProcessSnapshot) -> AgentSession? {
-        guard let data = try? Data(contentsOf: file),
-              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let sessionID = obj["id"] as? String else { return nil }
-        // Child/subagent sessions carry parentID; only show top-level ones.
-        if obj["parentID"] != nil { return nil }
+    private func parse(db: SQLiteDB, id: String, directory: String?, title: String?,
+                       createdMs: String?, updatedMs: String?,
+                       now: Date, alive: Bool) -> AgentSession? {
+        // Latest message in the session drives the state.
+        let msgRows = db.query(
+            "SELECT id, data, time_updated FROM message WHERE session_id = ? ORDER BY time_created DESC LIMIT 1",
+            [id]
+        )
+        guard let msg = msgRows.first,
+              let messageID = msg[0],
+              let data = msg[1],
+              let message = FileUtil.json(data) else { return nil }
 
-        let directory = obj["directory"] as? String
-        let title = obj["title"] as? String
-        let time = obj["time"] as? [String: Any]
-        let startedAt = (time?["created"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? metaMtime
+        let role = message["role"] as? String
+        let completed = (message["time"] as? [String: Any])?["completed"] != nil
 
-        // The session meta file lags behind the message stream; use the
-        // newest message file's mtime as the real activity signal.
-        let messagesDir = storageDir.appendingPathComponent("message").appendingPathComponent(sessionID)
-        let messages = FileUtil.recentFiles(in: messagesDir, suffix: ".json", now: now)
-            .sorted { $0.mtime < $1.mtime }
-        let lastActivity = max(metaMtime, messages.last?.mtime ?? .distantPast)
-
-        let age = now.timeIntervalSince(lastActivity)
-        let alive = processes.isRunning(kind)
-
-        var lastRole: String?
-        var lastCompleted = false
-        var lastText: String?
-        // Walk messages newest-first until we find assistant text to show.
-        for message in messages.reversed() {
-            guard let mData = try? Data(contentsOf: message.url),
-                  let m = (try? JSONSerialization.jsonObject(with: mData)) as? [String: Any] else { continue }
-            if lastRole == nil {
-                lastRole = m["role"] as? String
-                if let t = m["time"] as? [String: Any], t["completed"] != nil { lastCompleted = true }
-            }
-            if m["role"] as? String == "assistant" {
-                let messageID = message.url.deletingPathExtension().lastPathComponent
-                lastText = assistantText(messageID: messageID)
-                break
+        // Newest tool part on the latest assistant message: a running/pending
+        // tool means the tool is executing (working), not awaiting approval —
+        // OpenCode auto-runs within its granted permissions.
+        var toolRunning = false
+        var toolName: String?
+        if role == "assistant" {
+            let toolRows = db.query(
+                """
+                SELECT json_extract(data,'$.tool'), json_extract(data,'$.state.status')
+                FROM part
+                WHERE message_id = ? AND json_extract(data,'$.type') = 'tool'
+                ORDER BY time_created DESC LIMIT 1
+                """,
+                [messageID]
+            )
+            if let tool = toolRows.first {
+                toolName = tool[0]
+                toolRunning = ["running", "pending"].contains(tool[1] ?? "")
             }
         }
+
+        let lastActivity = Self.msDate(updatedMs) ?? now
+        let age = now.timeIntervalSince(lastActivity)
 
         var state: SessionState
         if age < Tuning.workingWindow {
             state = .working
-        } else if lastRole == "assistant" && lastCompleted {
-            state = .done
+        } else if role == "assistant" {
+            // During live generation OpenCode streams parts, bumping the
+            // timestamp, so age stays under the fresh-write window above.
+            // Past it, a running tool means work in flight; otherwise the
+            // turn is finished (completed) or stalled/abandoned — either way,
+            // done rather than a stuck green "working".
+            state = toolRunning ? (alive ? .working : .done) : .done
         } else {
-            // Turn in flight (user message last, or assistant not yet
-            // completed): working while the process lives.
-            state = alive ? .working : .done
+            state = alive ? .working : .done // user message last: in-flight
         }
 
         if state != .done && !alive { return nil }
         if state == .done && age > Tuning.doneRetention { return nil }
 
+        // Latest assistant text part, for the dropdown message line.
+        var lastText: String?
+        let textRows = db.query(
+            """
+            SELECT json_extract(data,'$.text')
+            FROM part
+            WHERE message_id = ? AND json_extract(data,'$.type') = 'text'
+            ORDER BY time_created DESC LIMIT 1
+            """,
+            [messageID]
+        )
+        lastText = textRows.first?.first ?? nil
+
         let activity: String
         switch state {
         case .done: activity = "finished"
         case .waiting: activity = "waiting for you"
-        case .working: activity = (title?.isEmpty == false ? title! : "working")
+        case .working:
+            if toolRunning, let toolName { activity = "running \(toolName)" }
+            else if let title, !title.isEmpty, !title.hasPrefix("New session") { activity = title }
+            else { activity = "working" }
         }
 
         return AgentSession(
-            id: "opencode:\(sessionID)", kind: kind,
+            id: "opencode:\(id)", kind: kind,
             projectName: (directory ?? "opencode").projectNameFromPath, cwd: directory,
-            activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
+            activity: activity, state: state,
+            startedAt: Self.msDate(createdMs) ?? lastActivity, lastActivityAt: lastActivity,
             lastMessage: lastText?.messageSnippet,
-            debugInfo: "lastRole=\(lastRole ?? "nil") completed=\(lastCompleted) age=\(Int(age))s alive=\(alive)"
+            debugInfo: "role=\(role ?? "nil") toolRunning=\(toolRunning) completed=\(completed) age=\(Int(age))s alive=\(alive)"
         )
     }
 
-    /// Latest text part of a message, from storage/part/<message-id>/.
-    private func assistantText(messageID: String) -> String? {
-        let partsDir = storageDir.appendingPathComponent("part").appendingPathComponent(messageID)
-        let parts = ((try? FileManager.default.contentsOfDirectory(atPath: partsDir.path)) ?? [])
-            .filter { $0.hasSuffix(".json") }
-            .sorted()
-        for name in parts.reversed() {
-            guard let data = try? Data(contentsOf: partsDir.appendingPathComponent(name)),
-                  let part = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  part["type"] as? String == "text",
-                  let text = part["text"] as? String, !text.isEmpty else { continue }
-            return text
-        }
-        return nil
+    private static func msDate(_ ms: String?) -> Date? {
+        guard let ms, let value = Double(ms) else { return nil }
+        return Date(timeIntervalSince1970: value / 1000)
     }
 }

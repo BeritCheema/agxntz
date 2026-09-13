@@ -19,7 +19,7 @@ get their own menu-bar item showing a colored dot plus the live activity text.
 |---|---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` | good |
 | Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | good |
-| OpenCode | `~/.local/share/opencode/storage/{session,message}` | good |
+| OpenCode | `~/.local/share/opencode/opencode.db` (SQLite) | good |
 | Grok CLI | `~/.grok/sessions/` (`GROK_HOME` honored) | heuristic |
 | pi | `~/.pi/agent/sessions/` (`PI_CODING_AGENT_SESSION_DIR` honored) | good |
 | Oh My Pi | `~/.omp/agent/sessions/` | good |
