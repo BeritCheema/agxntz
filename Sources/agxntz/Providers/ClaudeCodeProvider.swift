@@ -23,7 +23,11 @@ struct ClaudeCodeProvider: AgentProvider {
 
     private func parse(file: URL, mtime: Date, sessionID: String,
                        now: Date, processes: ProcessSnapshot) -> AgentSession? {
-        let lines = FileUtil.tailLines(of: file)
+        // A single record can be huge (a screenshot or big file read is one
+        // JSONL line, seen up to ~800KB), so read a generous tail — a small
+        // window can land entirely inside one record and yield no parseable
+        // conversation line, which would drop an active session.
+        let lines = FileUtil.tailLines(of: file, maxBytes: 2 * 1024 * 1024)
         guard !lines.isEmpty else { return nil }
 
         var cwd: String?
@@ -55,8 +59,27 @@ struct ClaudeCodeProvider: AgentProvider {
             }
         }
 
-        // Session summary/index files have no conversation records.
-        guard let lastMeaningful else { return nil }
+        let alive = processes.isRunning(kind)
+
+        // Fallback: the tail was entirely one oversized record (no parseable
+        // conversation line). Rather than drop what may be an active session,
+        // keep it and derive state from file freshness. Only real transcripts
+        // in an actively-running Claude reach here; stale ones age out below.
+        guard let lastMeaningful else {
+            let age = now.timeIntervalSince(mtime)
+            guard age < Tuning.scanWindow else { return nil }
+            let state: SessionState = age < Tuning.workingWindow
+                ? .working
+                : (alive ? .working : .done)
+            if state != .done && !alive { return nil }
+            let project = (cwd ?? Self.decodeDir(file.deletingLastPathComponent().lastPathComponent)).projectNameFromPath
+            return AgentSession(
+                id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
+                activity: state == .done ? "finished" : "working",
+                state: state, startedAt: firstTimestamp ?? mtime, lastActivityAt: mtime,
+                lastMessage: nil, debugInfo: "lastType=oversized age=\(Int(age))s alive=\(alive)"
+            )
+        }
 
         // Claude Code appends bookkeeping records (bridge-session etc.) to
         // idle session files, so mtime alone overstates activity. Anchor on
@@ -68,7 +91,6 @@ struct ClaudeCodeProvider: AgentProvider {
         // prompt, falling back to the session's start.
         let startedAt = lastPromptTS ?? FileUtil.creationDate(of: file) ?? firstTimestamp ?? lastActivity
         let age = now.timeIntervalSince(lastActivity)
-        let alive = processes.isRunning(kind)
 
         var state: SessionState
         if age < Tuning.workingWindow {
@@ -81,7 +103,7 @@ struct ClaudeCodeProvider: AgentProvider {
         if state == .done && age > Tuning.doneRetention { return nil }
 
         let activity = Self.activity(state: state, lastAssistant: lastAssistant)
-        let project = (cwd ?? file.deletingLastPathComponent().lastPathComponent).projectNameFromPath
+        let project = (cwd ?? Self.decodeDir(file.deletingLastPathComponent().lastPathComponent)).projectNameFromPath
 
         return AgentSession(
             id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
@@ -89,6 +111,12 @@ struct ClaudeCodeProvider: AgentProvider {
             lastMessage: lastAssistantText?.messageSnippet,
             debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive)"
         )
+    }
+
+    /// Turn Claude Code's encoded project-dir name back into a rough path so
+    /// the last component reads as the project ("-Users-me-Projects-app").
+    private static func decodeDir(_ name: String) -> String {
+        name.replacingOccurrences(of: "-", with: "/")
     }
 
     private static func assistantText(_ record: [String: Any]) -> String? {

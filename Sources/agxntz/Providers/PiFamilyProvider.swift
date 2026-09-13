@@ -81,14 +81,19 @@ struct PiFamilyProvider: AgentProvider {
 
         let age = now.timeIntervalSince(mtime)
         let alive = processes.isRunning(kind)
-        let toolPending = lastRole == "assistant"
+        // A trailing assistant tool call means the tool is *running* — these
+        // agents don't record a distinct permission-prompt state in the
+        // transcript, so a pending call is working, not waiting. (A running
+        // tool can take longer than the fresh-write window, which is exactly
+        // when this branch matters.)
+        let toolRunning = lastRole == "assistant"
             && !lastContentTypes.isDisjoint(with: ["toolCall", "tool_call", "tool_use", "toolUse"])
 
         var state: SessionState
         if age < Tuning.workingWindow {
             state = .working
-        } else if toolPending {
-            state = alive ? .waiting : .done
+        } else if toolRunning {
+            state = alive ? .working : .done
         } else if lastRole == "assistant" {
             state = .done
         } else {
@@ -102,8 +107,8 @@ struct PiFamilyProvider: AgentProvider {
         let activity: String
         switch state {
         case .done: activity = "finished"
-        case .waiting: activity = lastToolName.map { "wants to run \($0)" } ?? "waiting for you"
-        case .working: activity = lastToolName.map { "running \($0)" } ?? "working"
+        case .waiting: activity = "waiting for you"
+        case .working: activity = (toolRunning ? lastToolName.map { "running \($0)" } : nil) ?? "working"
         }
 
         let resolvedCwd = cwd ?? groupDir.lastPathComponent.replacingOccurrences(of: "-", with: "/")
@@ -115,7 +120,7 @@ struct PiFamilyProvider: AgentProvider {
             startedAt: lastUserTS ?? sessionStart ?? FileUtil.creationDate(of: file) ?? mtime,
             lastActivityAt: mtime,
             lastMessage: lastAssistantText?.messageSnippet,
-            debugInfo: "lastRole=\(lastRole ?? "nil") toolPending=\(toolPending) age=\(Int(age))s alive=\(alive)"
+            debugInfo: "lastRole=\(lastRole ?? "nil") toolRunning=\(toolRunning) age=\(Int(age))s alive=\(alive)"
         )
     }
 }
