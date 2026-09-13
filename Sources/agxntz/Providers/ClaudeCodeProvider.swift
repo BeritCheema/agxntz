@@ -92,8 +92,15 @@ struct ClaudeCodeProvider: AgentProvider {
         let startedAt = lastPromptTS ?? FileUtil.creationDate(of: file) ?? firstTimestamp ?? lastActivity
         let age = now.timeIntervalSince(lastActivity)
 
+        // A standalone `system` record is only ever written at turn-end/idle
+        // (stop_hook_summary, turn_duration, away_summary) — never during live
+        // generation. So a freshly-written system marker must NOT trip the
+        // "recent write = working" shortcut, or an idle away-summary flips a
+        // long-done session back to green for a few seconds.
+        let isTurnEndMarker = (lastMeaningful["type"] as? String) == "system"
+
         var state: SessionState
-        if age < Tuning.workingWindow {
+        if age < Tuning.workingWindow && !isTurnEndMarker {
             state = .working
         } else {
             state = Self.heuristicState(lastRecord: lastMeaningful, age: age, alive: alive)
