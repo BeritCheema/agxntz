@@ -33,7 +33,9 @@ struct CodexProvider: AgentProvider {
 
         var lastKind: String?     // task_complete | task_started | reasoning | message | function_call | function_call_output | user
         var lastToolName: String?
+        var lastMessage: String?
         for line in FileUtil.tailLines(of: file).reversed() {
+            if lastKind != nil && lastMessage != nil { break }
             guard let obj = FileUtil.json(line),
                   let type = obj["type"] as? String else { continue }
             guard type == "response_item" || type == "event_msg" else { continue }
@@ -43,29 +45,34 @@ struct CodexProvider: AgentProvider {
                 // Newer Codex writes explicit turn lifecycle events; they are
                 // the most reliable signal when they trail the transcript.
                 if pType == "task_complete" || pType == "turn_aborted" {
-                    lastKind = "task_complete"
-                    break
+                    if lastKind == nil { lastKind = "task_complete" }
+                    if lastMessage == nil { lastMessage = p["last_agent_message"] as? String }
                 }
-                if pType == "task_started" {
-                    lastKind = "task_started"
-                    break
-                }
+                if pType == "task_started", lastKind == nil { lastKind = "task_started" }
                 continue
             }
             switch pType {
             case "message":
-                lastKind = (p["role"] as? String) == "assistant" ? "message" : "user"
+                let isAssistant = (p["role"] as? String) == "assistant"
+                if lastKind == nil { lastKind = isAssistant ? "message" : "user" }
+                if isAssistant, lastMessage == nil, let content = p["content"] as? [[String: Any]] {
+                    let texts = content.compactMap { item -> String? in
+                        ["output_text", "text"].contains(item["type"] as? String ?? "") ? item["text"] as? String : nil
+                    }
+                    if !texts.isEmpty { lastMessage = texts.joined(separator: " ") }
+                }
             case "function_call", "local_shell_call", "custom_tool_call":
-                lastKind = "function_call"
-                lastToolName = p["name"] as? String
+                if lastKind == nil {
+                    lastKind = "function_call"
+                    lastToolName = p["name"] as? String
+                }
             case "function_call_output", "local_shell_call_output", "custom_tool_call_output":
-                lastKind = "function_call_output"
+                if lastKind == nil { lastKind = "function_call_output" }
             case "reasoning":
-                lastKind = "reasoning"
+                if lastKind == nil { lastKind = "reasoning" }
             default:
                 continue
             }
-            break
         }
 
         let age = now.timeIntervalSince(mtime)
@@ -108,7 +115,8 @@ struct CodexProvider: AgentProvider {
         return AgentSession(
             id: "codex:\(sessionID)", kind: kind,
             projectName: (cwd ?? "codex").projectNameFromPath, cwd: cwd,
-            activity: activity, state: state, startedAt: startedAt, lastActivityAt: mtime
+            activity: activity, state: state, startedAt: startedAt, lastActivityAt: mtime,
+            lastMessage: lastMessage?.messageSnippet
         )
     }
 }

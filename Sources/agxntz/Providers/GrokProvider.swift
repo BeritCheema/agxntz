@@ -128,7 +128,29 @@ enum GenericTailClassifier {
             id: "\(idPrefix):\(sessionID)", kind: kind,
             projectName: (cwd ?? idPrefix).projectNameFromPath, cwd: cwd,
             activity: activity, state: state,
-            startedAt: FileUtil.creationDate(of: file) ?? mtime, lastActivityAt: mtime
+            startedAt: FileUtil.creationDate(of: file) ?? mtime, lastActivityAt: mtime,
+            lastMessage: latestAssistantText(in: file)?.messageSnippet
         )
+    }
+
+    /// Best-effort: newest assistant-authored text in an undocumented JSONL
+    /// transcript. Looks for role=assistant records and pulls string content
+    /// or text fields out of content arrays.
+    private static func latestAssistantText(in file: URL) -> String? {
+        for line in FileUtil.tailLines(of: file, maxBytes: 64 * 1024).suffix(40).reversed() {
+            guard line.contains("assistant"), let obj = FileUtil.json(line) else { continue }
+            // The message may be the record itself or nested under "message".
+            for candidate in [obj, obj["message"] as? [String: Any] ?? [:]] {
+                guard candidate["role"] as? String == "assistant" else { continue }
+                if let text = candidate["content"] as? String, !text.isEmpty { return text }
+                if let content = candidate["content"] as? [[String: Any]] {
+                    let texts = content.compactMap { item -> String? in
+                        ["text", "output_text"].contains(item["type"] as? String ?? "") ? item["text"] as? String : nil
+                    }
+                    if !texts.isEmpty { return texts.joined(separator: " ") }
+                }
+            }
+        }
+        return nil
     }
 }

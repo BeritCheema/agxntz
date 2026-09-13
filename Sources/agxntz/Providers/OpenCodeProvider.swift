@@ -44,11 +44,20 @@ struct OpenCodeProvider: AgentProvider {
 
         var lastRole: String?
         var lastCompleted = false
-        if let lastMessage = messages.last,
-           let mData = try? Data(contentsOf: lastMessage.url),
-           let m = (try? JSONSerialization.jsonObject(with: mData)) as? [String: Any] {
-            lastRole = m["role"] as? String
-            if let t = m["time"] as? [String: Any], t["completed"] != nil { lastCompleted = true }
+        var lastText: String?
+        // Walk messages newest-first until we find assistant text to show.
+        for message in messages.reversed() {
+            guard let mData = try? Data(contentsOf: message.url),
+                  let m = (try? JSONSerialization.jsonObject(with: mData)) as? [String: Any] else { continue }
+            if lastRole == nil {
+                lastRole = m["role"] as? String
+                if let t = m["time"] as? [String: Any], t["completed"] != nil { lastCompleted = true }
+            }
+            if m["role"] as? String == "assistant" {
+                let messageID = message.url.deletingPathExtension().lastPathComponent
+                lastText = assistantText(messageID: messageID)
+                break
+            }
         }
 
         var state: SessionState
@@ -73,7 +82,24 @@ struct OpenCodeProvider: AgentProvider {
         return AgentSession(
             id: "opencode:\(sessionID)", kind: kind,
             projectName: (directory ?? "opencode").projectNameFromPath, cwd: directory,
-            activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity
+            activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
+            lastMessage: lastText?.messageSnippet
         )
+    }
+
+    /// Latest text part of a message, from storage/part/<message-id>/.
+    private func assistantText(messageID: String) -> String? {
+        let partsDir = storageDir.appendingPathComponent("part").appendingPathComponent(messageID)
+        let parts = ((try? FileManager.default.contentsOfDirectory(atPath: partsDir.path)) ?? [])
+            .filter { $0.hasSuffix(".json") }
+            .sorted()
+        for name in parts.reversed() {
+            guard let data = try? Data(contentsOf: partsDir.appendingPathComponent(name)),
+                  let part = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  part["type"] as? String == "text",
+                  let text = part["text"] as? String, !text.isEmpty else { continue }
+            return text
+        }
+        return nil
     }
 }

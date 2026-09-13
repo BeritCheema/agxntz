@@ -40,6 +40,7 @@ struct ClaudeCodeProvider: AgentProvider {
         var lastAssistant: [String: Any]?
         var firstTimestamp: Date?
         var lastPromptTS: Date?
+        var lastAssistantText: String?
 
         for line in lines {
             guard let obj = FileUtil.json(line) else { continue }
@@ -52,7 +53,10 @@ struct ClaudeCodeProvider: AgentProvider {
             if type == "user" || type == "assistant" || type == "system" {
                 lastMeaningful = obj
                 lastMeaningfulTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? lastMeaningfulTS
-                if type == "assistant" { lastAssistant = obj }
+                if type == "assistant" {
+                    lastAssistant = obj
+                    if let text = Self.assistantText(obj) { lastAssistantText = text }
+                }
                 if type == "user", Self.isHumanPrompt(obj) {
                     lastPromptTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? lastPromptTS
                 }
@@ -107,8 +111,19 @@ struct ClaudeCodeProvider: AgentProvider {
 
         return AgentSession(
             id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
-            activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity
+            activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
+            lastMessage: lastAssistantText?.messageSnippet
         )
+    }
+
+    private static func assistantText(_ record: [String: Any]) -> String? {
+        guard let message = record["message"] as? [String: Any],
+              let content = message["content"] as? [[String: Any]] else { return nil }
+        let texts = content.compactMap { item -> String? in
+            item["type"] as? String == "text" ? item["text"] as? String : nil
+        }
+        let joined = texts.joined(separator: " ")
+        return joined.isEmpty ? nil : joined
     }
 
     private static func heuristicState(lastRecord: [String: Any], age: TimeInterval, alive: Bool) -> SessionState {

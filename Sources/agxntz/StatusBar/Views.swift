@@ -109,47 +109,59 @@ struct SessionRow: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Circle()
-                .fill(session.state.color)
-                .frame(width: 9, height: 9)
+        // cmux-style row: header line with identity + time + pin, then the
+        // live status, then the agent's latest message text.
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle()
+                    .fill(session.state.color)
+                    .frame(width: 9, height: 9)
+                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 3 }
 
-            VStack(alignment: .leading, spacing: 1) {
                 Text(session.projectName)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
+
                 Text(session.kind.rawValue)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-            }
-            .frame(width: 108, alignment: .leading)
 
-            Text(session.state == .done ? session.finishedAgoText : session.activity)
+                Spacer(minLength: 8)
+
+                Text(session.state == .done ? AgentSession.shortDuration(-session.lastActivityAt.timeIntervalSinceNow) + " ago" : session.elapsedText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+
+                Button {
+                    store.togglePin(session.id)
+                } label: {
+                    Image(systemName: store.isPinned(session.id) ? "pin.fill" : "pin")
+                        .font(.system(size: 11))
+                        .foregroundStyle(store.isPinned(session.id) ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(store.isPinned(session.id) ? "Unpin from menu bar" : "Pin to menu bar")
+            }
+
+            Text(session.state == .done ? "finished" : session.activity)
                 .font(.system(size: 12))
                 .foregroundStyle(session.state == .done ? .secondary : .primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 15)
 
-            if session.state != .done {
-                Text(session.elapsedText)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            Button {
-                store.togglePin(session.id)
-            } label: {
-                Image(systemName: store.isPinned(session.id) ? "pin.fill" : "pin")
+            if let message = session.lastMessage {
+                Text(message)
                     .font(.system(size: 11))
-                    .foregroundStyle(store.isPinned(session.id) ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .padding(.leading, 15)
             }
-            .buttonStyle(.plain)
-            .help(store.isPinned(session.id) ? "Unpin from menu bar" : "Pin to menu bar")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
         .onHover { hovering = $0 }
     }

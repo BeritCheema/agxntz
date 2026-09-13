@@ -20,7 +20,7 @@ final class SessionStore: ObservableObject {
         pinnedIDs = UserDefaults.standard.stringArray(forKey: pinsKey) ?? []
     }
 
-    func start(interval: TimeInterval = 2.0) {
+    func start(interval: TimeInterval = 1.0) {
         refresh()
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }

@@ -36,6 +36,16 @@ struct AgentSession: Identifiable, Equatable {
     let state: SessionState
     let startedAt: Date
     let lastActivityAt: Date  // for done sessions, when the turn finished
+    var lastMessage: String? = nil  // latest agent-authored text, for the dropdown
+}
+
+extension String {
+    /// Collapse whitespace/newlines into a compact single-spaced snippet.
+    var messageSnippet: String? {
+        let collapsed = split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if collapsed.isEmpty { return nil }
+        return collapsed.count > 280 ? String(collapsed.prefix(280)) + "…" : collapsed
+    }
 }
 
 extension AgentSession {
