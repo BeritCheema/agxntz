@@ -83,8 +83,8 @@ struct AggregateElementView: View {
             }
         }
         .padding(.horizontal, 7)
-        .frame(height: 22)
-        .fixedSize()
+        .frame(maxHeight: .infinity)                       // fill the button height…
+        .fixedSize(horizontal: true, vertical: false)     // …and center; hug width
     }
 }
 
@@ -117,8 +117,8 @@ struct PinnedItemView: View {
             }
         }
         .padding(.horizontal, 6)
-        .frame(height: 22)
-        .fixedSize()
+        .frame(maxHeight: .infinity)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
