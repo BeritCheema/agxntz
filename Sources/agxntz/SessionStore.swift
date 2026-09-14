@@ -72,6 +72,41 @@ final class SessionStore: ObservableObject {
         sessions.contains { !pinnedIDs.contains($0.id) }
     }
 
+    /// Aggregate (unpinned) agents packed into menu-bar elements: one element
+    /// of up to 6 dots; when more than 6 agents, the largest state group peels
+    /// off into its own element; a single state over 6 becomes a "● N" count.
+    var aggregateElements: [AggregateElement] {
+        let pinned = Set(pinnedIDs)
+        var counts: [SessionState: Int] = [:]
+        for session in sessions where !pinned.contains(session.id) {
+            counts[session.state, default: 0] += 1
+        }
+
+        var elements: [AggregateElement] = []
+        var remaining: [(SessionState, Int)] = []      // groups of ≤6, in state order
+        for state in [SessionState.working, .waiting, .done] {
+            guard let c = counts[state], c > 0 else { continue }
+            if c > 6 { elements.append(.number(state, c)) }
+            else { remaining.append((state, c)) }
+        }
+
+        while !remaining.isEmpty {
+            let total = remaining.reduce(0) { $0 + $1.1 }
+            if total <= 6 {
+                var dots: [SessionState] = []
+                for (state, c) in remaining { dots += Array(repeating: state, count: c) }
+                elements.append(.dots(dots))
+                remaining.removeAll()
+            } else {
+                // Split off the state with the most agents into its own element.
+                let idx = remaining.indices.max { remaining[$0].1 < remaining[$1].1 }!
+                let (state, c) = remaining.remove(at: idx)
+                elements.append(.dots(Array(repeating: state, count: c)))
+            }
+        }
+        return elements
+    }
+
     /// Every monitorable entity: main sessions plus their sub-agents. Used so
     /// a sub-agent can be pinned and resolved just like a main session.
     var allMonitorable: [AgentSession] {

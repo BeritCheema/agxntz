@@ -19,62 +19,66 @@ extension SessionState {
     }
 }
 
-/// Clustered dots for a state's count: 1 = a single dot, 2 = two stacked
-/// vertically, 3 = a triangle, 4+ = one dot + the number.
-struct StateCluster: View {
-    let color: Color
-    let count: Int
+/// One agent per dot, colored by state, laid out as a compact pyramid:
+/// 1 (bigger) · 2 stacked · 3 = stack + centered right apex · 4 square ·
+/// 5 = square + centered right apex · 6 = two rows of three. Spacing is
+/// uniform across all counts.
+struct DotClusterView: View {
+    let colors: [Color]          // ordered, 1...6
 
     private let dot: CGFloat = 6
-    // Center-to-center offset that leaves a hair of gap between dots.
-    private var r: CGFloat { dot / 2 + 1.5 }
+    private let big: CGFloat = 10
+    private static let s: CGFloat = 9   // center spacing (dot + gap)
 
     var body: some View {
-        switch count {
-        case 1:
-            cluster(width: dot, height: dot) { [(0, 0)] }
-        case 2:
-            cluster(width: dot, height: dot + 2 * r) { [(0, -r), (0, r)] }
-        case 3:
-            // Apex up, two dots on the base.
-            cluster(width: 2 * r + dot, height: 2 * r + dot) {
-                [(0, -r), (-r, r), (r, r)]
-            }
-        default:
-            HStack(spacing: 4) {
-                circle
-                Text("\(count)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .monospacedDigit()
-            }
-        }
-    }
+        let positions = Self.positions(colors.count)
+        let dia = colors.count == 1 ? big : dot
+        let minX = positions.map(\.0).min() ?? 0
+        let minY = positions.map(\.1).min() ?? 0
+        let width = (positions.map(\.0).max() ?? 0) - minX + dia
+        let height = (positions.map(\.1).max() ?? 0) - minY + dia
 
-    private var circle: some View {
-        Circle().fill(color).frame(width: dot, height: dot)
-    }
-
-    private func cluster(width: CGFloat, height: CGFloat,
-                         offsets: () -> [(CGFloat, CGFloat)]) -> some View {
-        ZStack {
-            ForEach(Array(offsets().enumerated()), id: \.offset) { _, pos in
-                circle.offset(x: pos.0, y: pos.1)
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(positions.enumerated()), id: \.offset) { i, p in
+                Circle()
+                    .fill(i < colors.count ? colors[i] : .clear)
+                    .frame(width: dia, height: dia)
+                    .offset(x: p.0 - minX, y: p.1 - minY)
             }
         }
         .frame(width: width, height: height)
     }
+
+    /// Top-left dot origins (points) for each count. Odd counts add a
+    /// vertically-centered apex one unit to the right of the base.
+    static func positions(_ n: Int) -> [(CGFloat, CGFloat)] {
+        switch n {
+        case 1:  return [(0, 0)]
+        case 2:  return [(0, 0), (0, s)]
+        case 3:  return [(0, 0), (0, s), (s, s / 2)]
+        case 4:  return [(0, 0), (s, 0), (0, s), (s, s)]
+        case 5:  return [(0, 0), (s, 0), (0, s), (s, s), (2 * s, s / 2)]
+        default: return [(0, 0), (s, 0), (2 * s, 0), (0, s), (s, s), (2 * s, s)]
+        }
+    }
 }
 
-/// Menu-bar content: one clustered-dot group per non-empty state. Nothing else.
-struct CounterView: View {
-    @ObservedObject var store: SessionStore
+/// A single aggregate menu-bar element: a dot cluster, or a "● N" count for a
+/// state with more than 6 agents.
+struct AggregateElementView: View {
+    let element: AggregateElement
 
     var body: some View {
-        HStack(spacing: 12) {
-            ForEach([SessionState.working, .waiting, .done], id: \.rawValue) { state in
-                let count = store.unpinnedCount(of: state)
-                if count > 0 {
-                    StateCluster(color: state.color, count: count)
+        Group {
+            switch element {
+            case .dots(let states):
+                DotClusterView(colors: states.map(\.color))
+            case .number(let state, let count):
+                HStack(spacing: 4) {
+                    Circle().fill(state.color).frame(width: 8, height: 8)
+                    Text("\(count)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
                 }
             }
         }

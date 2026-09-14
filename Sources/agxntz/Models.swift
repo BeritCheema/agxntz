@@ -37,6 +37,14 @@ enum SessionState: Int, Comparable {
     static func < (lhs: SessionState, rhs: SessionState) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// One menu-bar aggregate element: either up to 6 individual agent dots
+/// (colored by state, ordered working→waiting→done) or, for a single state
+/// with more than 6 agents, a "● N" count.
+enum AggregateElement: Equatable {
+    case dots([SessionState])
+    case number(SessionState, Int)
+}
+
 struct AgentSession: Identifiable, Equatable {
     let id: String            // e.g. "claude:<session-uuid>"
     let kind: AgentKind

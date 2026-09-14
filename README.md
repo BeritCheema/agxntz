@@ -2,10 +2,13 @@
 
 Minimal macOS menu-bar monitor for local AI coding agents.
 
-**Philosophy: minimal hindrance, glanceable status.** The menu bar shows only
-colored counters — 🟢 working, 🟠 waiting for you, 🔵 done. No name, no icon,
-no words. States with zero agents show nothing; with no relevant agents at
-all, agxntz has no menu-bar presence whatsoever.
+**Philosophy: minimal hindrance, glanceable status.** The menu bar shows one
+compact element: a dot per active agent, colored by state — 🟢 working,
+🟠 waiting for you, 🔵 done — packed into a small pyramid (1 bigger · 2
+stacked · 3 stack+apex · 4 square · 5 square+apex · 6 two rows of three).
+Beyond 6 agents the largest state group splits into its own element, and a
+single state over 6 collapses to a `● N` count. No name, no icon, no words;
+with no relevant agents at all, agxntz has no menu-bar presence whatsoever.
 
 Clicking the counters opens a compact dropdown that goes straight into
 Working → Waiting → Done groups (empty groups omitted). Each row shows the

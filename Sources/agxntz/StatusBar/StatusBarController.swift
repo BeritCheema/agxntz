@@ -5,7 +5,8 @@ import Combine
 @MainActor
 final class StatusBarController: NSObject {
     private let store: SessionStore
-    private var aggregateItem: NSStatusItem?
+    private var aggregateItems: [NSStatusItem] = []
+    private var aggregateRendered: [AggregateElement] = []
     private var pinnedItems: [String: NSStatusItem] = [:]
     private var pinnedRendered: [String: AgentSession] = [:]  // last session rendered per pin
     private var panel: DropdownPanel?
@@ -32,17 +33,24 @@ final class StatusBarController: NSObject {
     }
 
     private func syncAggregate() {
-        let hasSessions = store.hasUnpinnedSessions
-        if hasSessions {
-            if aggregateItem == nil {
+        let elements = store.aggregateElements
+
+        // The element count changes only when crossing the 6-agent split
+        // thresholds (rare) — rebuild the items then; otherwise update each
+        // item's hosted view in place so nothing flickers.
+        if elements.count != aggregateItems.count {
+            aggregateItems.forEach { NSStatusBar.system.removeStatusItem($0) }
+            aggregateItems = elements.map { element in
                 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-                configure(item: item, rootView: AnyView(CounterView(store: store)))
-                aggregateItem = item
+                configure(item: item, rootView: AnyView(AggregateElementView(element: element)))
+                return item
             }
-        } else if let item = aggregateItem {
-            // No relevant agents: no menu-bar presence at all.
-            NSStatusBar.system.removeStatusItem(item)
-            aggregateItem = nil
+            aggregateRendered = elements
+        } else {
+            for (i, element) in elements.enumerated() where aggregateRendered[i] != element {
+                swapHostedView(of: aggregateItems[i], rootView: AnyView(AggregateElementView(element: element)))
+                aggregateRendered[i] = element
+            }
         }
     }
 
@@ -126,7 +134,9 @@ final class StatusBarController: NSObject {
         panel.ownedWindows = { [weak self] in
             guard let self else { return [] }
             var windows: [NSWindow] = []
-            if let w = self.aggregateItem?.button?.window { windows.append(w) }
+            for item in self.aggregateItems {
+                if let w = item.button?.window { windows.append(w) }
+            }
             for item in self.pinnedItems.values {
                 if let w = item.button?.window { windows.append(w) }
             }
