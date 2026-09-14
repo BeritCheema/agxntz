@@ -10,15 +10,33 @@ final class StatusBarController: NSObject {
     private var pinnedItems: [String: NSStatusItem] = [:]
     private var pinnedRendered: [String: AgentSession] = [:]  // last session rendered per pin
     private var panel: DropdownPanel?
+    private let settingsWindow: SettingsWindowController
     private var cancellables = Set<AnyCancellable>()
 
     init(store: SessionStore) {
         self.store = store
+        self.settingsWindow = SettingsWindowController(store: store)
         super.init()
         store.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 DispatchQueue.main.async { self?.sync() }
+            }
+            .store(in: &cancellables)
+        // React to settings changes: restart polling, and force a full menu-bar
+        // rebuild so ticker speed/size and dot cap take effect immediately.
+        AppSettings.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.store.restartTimer()
+                    self.pinnedRendered.removeAll()
+                    self.aggregateRendered.removeAll()
+                    self.aggregateItems.forEach { NSStatusBar.system.removeStatusItem($0) }
+                    self.aggregateItems.removeAll()
+                    self.sync()
+                }
             }
             .store(in: &cancellables)
         sync()
@@ -133,7 +151,10 @@ final class StatusBarController: NSObject {
             panel.dismiss()
             if sameAnchor { return } // plain toggle-off
         }
-        let panel = DropdownPanel(store: store)
+        let panel = DropdownPanel(store: store) { [weak self] in
+            self?.panel?.dismiss()
+            self?.settingsWindow.show()
+        }
         panel.onClose = { [weak self] in self?.panel = nil }
         panel.ownedWindows = { [weak self] in
             guard let self else { return [] }
@@ -161,6 +182,10 @@ final class StatusBarController: NSObject {
             menu.addItem(.separator())
         }
 
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+        menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit agxntz", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -176,6 +201,10 @@ final class StatusBarController: NSObject {
         if let id = sender.representedObject as? String {
             store.togglePin(id)
         }
+    }
+
+    @objc private func openSettings() {
+        settingsWindow.show()
     }
 
     @objc private func quit() {

@@ -88,7 +88,9 @@ struct PinnedItemView: View {
             } else {
                 HStack(spacing: 5) {
                     Circle().fill(session.state.color).frame(width: 8, height: 8)
-                    MarqueeText(text: scanText, width: tickerWidth)
+                    MarqueeText(text: scanText, width: tickerWidth,
+                                fontSize: AppSettings.shared.tickerFontSize,
+                                speed: AppSettings.shared.tickerSpeed)
                 }
             }
         }
@@ -144,6 +146,8 @@ struct MarqueeText: View {
 /// The dropdown: straight into Working / Waiting / Done groups, empty groups omitted.
 struct DropdownView: View {
     @ObservedObject var store: SessionStore
+    var onOpenSettings: () -> Void = {}
+    @State private var gearHover = false
 
     var body: some View {
         let groups = [SessionState.working, .waiting, .done]
@@ -164,12 +168,33 @@ struct DropdownView: View {
                         SessionRow(session: session, store: store)
                     }
                 }
+                if groups.isEmpty {
+                    Text("No active agents")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 14)
+                }
             }
+            .padding(.top, 6)
             .padding(.bottom, 10)
         }
         .frame(width: 360)
         .frame(maxHeight: 520)
         .fixedSize(horizontal: false, vertical: true)
+        .overlay(alignment: .topTrailing) {
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(gearHover ? Color.primary : Color.secondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .onHover { gearHover = $0 }
+            .help("Settings")
+            .padding(.top, 6)
+            .padding(.trailing, 8)
+        }
     }
 }
 

@@ -14,7 +14,7 @@ final class DropdownPanel: NSPanel {
     /// status items — their button actions handle toggling themselves).
     var ownedWindows: () -> [NSWindow] = { [] }
 
-    init(store: SessionStore) {
+    init(store: SessionStore, onOpenSettings: @escaping () -> Void) {
         super.init(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -41,7 +41,7 @@ final class DropdownPanel: NSPanel {
         effect.layer?.borderWidth = 1
         effect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
 
-        let host = NSHostingView(rootView: DropdownView(store: store))
+        let host = NSHostingView(rootView: DropdownView(store: store, onOpenSettings: onOpenSettings))
         host.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(host)
         NSLayoutConstraint.activate([

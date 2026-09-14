@@ -21,23 +21,31 @@ final class SessionStore: ObservableObject {
         pinnedIDs = UserDefaults.standard.stringArray(forKey: pinsKey) ?? []
     }
 
-    func start(interval: TimeInterval = 1.0) {
+    func start() {
         refresh()
+        restartTimer()
+    }
+
+    /// (Re)create the poll timer using the current interval setting.
+    func restartTimer() {
+        timer?.invalidate()
+        let interval = max(0.25, AppSettings.shared.pollInterval)
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        t.tolerance = 0.5
+        t.tolerance = min(0.5, interval / 2)
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
 
     func refresh() {
         let providers = self.providers
+        let disabled = AppSettings.shared.disabledAgents   // snapshot on main
         Task.detached(priority: .utility) {
             let now = Date()
             let processes = ProcessSnapshot.capture()
             var collected: [AgentSession] = []
-            for provider in providers {
+            for provider in providers where !disabled.contains(provider.kind.rawValue) {
                 collected.append(contentsOf: provider.scan(now: now, processes: processes))
             }
             collected.sort { a, b in
@@ -82,17 +90,18 @@ final class SessionStore: ObservableObject {
             counts[session.state, default: 0] += 1
         }
 
+        let cap = Tuning.config.maxDots
         var elements: [AggregateElement] = []
-        var remaining: [(SessionState, Int)] = []      // groups of ≤6, in state order
+        var remaining: [(SessionState, Int)] = []      // groups of ≤cap, in state order
         for state in [SessionState.working, .waiting, .done] {
             guard let c = counts[state], c > 0 else { continue }
-            if c > 6 { elements.append(.number(state, c)) }
+            if c > cap { elements.append(.number(state, c)) }
             else { remaining.append((state, c)) }
         }
 
         while !remaining.isEmpty {
             let total = remaining.reduce(0) { $0 + $1.1 }
-            if total <= 6 {
+            if total <= cap {
                 var dots: [SessionState] = []
                 for (state, c) in remaining { dots += Array(repeating: state, count: c) }
                 elements.append(.dots(dots))

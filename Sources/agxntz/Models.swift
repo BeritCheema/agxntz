@@ -97,17 +97,22 @@ extension AgentSession {
 }
 
 enum Tuning {
+    /// User-tunable values (mirrored from AppSettings). Read from background
+    /// scan threads, so kept as a plain value updated on the main thread;
+    /// a slightly stale read between ticks is harmless.
+    struct Config {
+        var doneRetention: TimeInterval = 30 * 60
+        var killedRetention: TimeInterval = 2 * 60
+        var maxDots: Int = 6
+    }
+    nonisolated(unsafe) static var config = Config()
+
     /// A write within this window means the agent is actively working.
     static let workingWindow: TimeInterval = 12
-    /// A session backed by a live process lingers this long after its last
-    /// activity (so you notice completion) before dropping.
-    static let doneRetention: TimeInterval = 30 * 60
-    /// A session whose process is gone (killed / CLI closed) is kept only this
-    /// briefly. Actively-writing sessions always fall within this window, so a
-    /// genuinely live session is never dropped even if process detection misses.
-    static let killedRetention: TimeInterval = 2 * 60
+    static var doneRetention: TimeInterval { config.doneRetention }
+    static var killedRetention: TimeInterval { config.killedRetention }
     /// Session files untouched for longer than this are not scanned at all.
-    static let scanWindow: TimeInterval = doneRetention + 5 * 60
+    static var scanWindow: TimeInterval { config.doneRetention + 5 * 60 }
 
     /// Whether a session should drop from the list this tick, given whether a
     /// live process backs it. Live: done shows for `doneRetention`. Not live

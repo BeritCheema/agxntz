@@ -85,11 +85,24 @@ Debug helpers:
 .build/debug/agxntz --scan   # one detection pass, printed to stdout
 ```
 
+## Settings
+
+A gear icon at the top-right of the dropdown (or **right-click → Settings…**)
+opens a sidebar/detail Settings window:
+
+- **Dashboard** — live agent overview, per-agent counts, and pinned sessions
+- **Appearance** — pinned-ticker scroll speed and text size, dots-before-split
+- **Behavior** — done/killed retention durations, rescan interval
+- **Agents** — enable/disable each agent type
+
+Settings persist and apply live.
+
 ## Controls
 
 - **Left-click** counters or a pinned item → dropdown
+- **Gear icon** (dropdown top-right) → Settings
 - **Pin icon** on a row → keep that session in the menu bar (dot + live activity)
-- **Right-click** → unpin / install Claude hooks / quit
+- **Right-click** → unpin / Settings… / quit
 
 ## Prior art
 
