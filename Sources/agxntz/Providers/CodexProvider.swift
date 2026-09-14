@@ -31,8 +31,9 @@ struct CodexProvider: AgentProvider {
         for var parent in parents {
             let parentThreadID = parent.id.replacingOccurrences(of: "codex:", with: "")
             if let subs = subsByParent.removeValue(forKey: parentThreadID) {
+                // Stable order: by state, then start time (unchanging).
                 parent.subAgents = subs.sorted {
-                    $0.state == $1.state ? $0.lastActivityAt > $1.lastActivityAt : $0.state < $1.state
+                    $0.state == $1.state ? $0.startedAt < $1.startedAt : $0.state < $1.state
                 }
             }
             result.append(parent)

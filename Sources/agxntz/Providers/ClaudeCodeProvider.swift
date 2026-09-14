@@ -140,7 +140,9 @@ struct ClaudeCodeProvider: AgentProvider {
             }
         }
         // Newest activity first.
-        return out.sorted { $0.state == $1.state ? $0.lastActivityAt > $1.lastActivityAt : $0.state < $1.state }
+        // Stable order: by state, then start time (start time never changes,
+        // so nested rows don't reshuffle as activity ticks).
+        return out.sorted { $0.state == $1.state ? $0.startedAt < $1.startedAt : $0.state < $1.state }
     }
 
     private func parseSubAgent(file: URL, mtime: Date, cwd: String?, now: Date, parentAlive: Bool) -> AgentSession? {

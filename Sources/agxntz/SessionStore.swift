@@ -16,6 +16,11 @@ final class SessionStore: ObservableObject {
     ]
     private var timer: Timer?
     private let pinsKey = "agxntz.pinnedSessionIDs"
+    // Stable display order: first-seen index per session id. Rows are grouped
+    // by state but keep their position within a group, so an agent only moves
+    // when its state changes — never merely because its activity time ticked.
+    private var orderIndex: [String: Int] = [:]
+    private var orderCounter = 0
 
     init() {
         pinnedIDs = UserDefaults.standard.stringArray(forKey: pinsKey) ?? []
@@ -48,12 +53,10 @@ final class SessionStore: ObservableObject {
             for provider in providers where !disabled.contains(provider.kind.rawValue) {
                 collected.append(contentsOf: provider.scan(now: now, processes: processes))
             }
-            collected.sort { a, b in
-                a.state == b.state ? a.lastActivityAt > b.lastActivityAt : a.state < b.state
-            }
-            let result = collected
+            let scanned = collected
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                let result = self.stableSorted(scanned)
                 if result != self.sessions {
                     self.logTransitions(from: self.sessions, to: result)
                     self.sessions = result
@@ -63,6 +66,23 @@ final class SessionStore: ObservableObject {
                 let kept = self.pinnedIDs.filter(live.contains)
                 if kept != self.pinnedIDs { self.setPins(kept) }
             }
+        }
+    }
+
+    /// Group by state, keeping each session's position within its group stable
+    /// (by first-seen order). New sessions get the next index and append to the
+    /// end of their group. A session changing state moves groups but keeps its
+    /// index, so ordering never churns from activity-time changes alone.
+    private func stableSorted(_ scanned: [AgentSession]) -> [AgentSession] {
+        for s in scanned where orderIndex[s.id] == nil {
+            orderIndex[s.id] = orderCounter
+            orderCounter += 1
+        }
+        let liveIDs = Set(scanned.map(\.id))
+        orderIndex = orderIndex.filter { liveIDs.contains($0.key) }
+        return scanned.sorted { a, b in
+            a.state != b.state ? a.state < b.state
+                : (orderIndex[a.id] ?? 0) < (orderIndex[b.id] ?? 0)
         }
     }
 
