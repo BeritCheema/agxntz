@@ -38,18 +38,26 @@ enum FileUtil {
         ).filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }) ?? []
     }
 
-    /// Last `maxBytes` of a file, split into complete lines.
+    /// Last `maxBytes` of a file, split into complete lines. Splits on newline
+    /// bytes and decodes each line individually so a half-written trailing
+    /// record (the file is being appended to live, often ending mid-UTF-8
+    /// character) can't fail the decode of the whole tail — which would
+    /// momentarily blank the session. Undecodable/partial lines are skipped.
     static func tailLines(of url: URL, maxBytes: Int = 128 * 1024) -> [String] {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return [] }
         let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
         try? handle.seek(toOffset: offset)
-        guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return [] }
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        if offset > 0, !lines.isEmpty { lines.removeFirst() } // drop partial first line
-        return lines
+        guard let data = try? handle.readToEnd() else { return [] }
+
+        let newline = UInt8(ascii: "\n")
+        var segments = data.split(separator: newline, omittingEmptySubsequences: false)
+        // Drop the partial first line (window started mid-record).
+        if offset > 0, !segments.isEmpty { segments.removeFirst() }
+        return segments.compactMap { seg in
+            seg.isEmpty ? nil : String(data: Data(seg), encoding: .utf8)
+        }
     }
 
     /// First complete line of a file. Reads in growing chunks: some agents
