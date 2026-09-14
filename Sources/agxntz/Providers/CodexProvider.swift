@@ -118,9 +118,10 @@ struct CodexProvider: AgentProvider {
             case "task_complete", "message":
                 state = .done
             case "function_call":
-                // A call with no recorded output after the working window
-                // usually means an approval prompt is pending.
-                state = alive ? .waiting : .done
+                // Codex auto-runs its tools (exec / wait on a background
+                // command). A pending call with no output yet is the agent
+                // running that command — working, not waiting on the user.
+                state = alive ? .working : .done
             default:
                 // task_started / reasoning / user / function_call_output: a
                 // turn is in flight and generation writes nothing until it
@@ -138,7 +139,12 @@ struct CodexProvider: AgentProvider {
         case .working:
             switch lastKind {
             case "reasoning": activity = "thinking"
-            case "function_call": activity = lastToolName.map { "running \($0)" } ?? "running a tool"
+            case "function_call":
+                switch lastToolName {
+                case "wait": activity = "running background task"
+                case "exec", "shell", "local_shell", "bash", nil: activity = "running a command"
+                case let name?: activity = "running \(name)"
+                }
             case "message": activity = "responding"
             default: activity = "working"
             }
