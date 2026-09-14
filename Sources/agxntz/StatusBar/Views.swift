@@ -2,13 +2,14 @@ import SwiftUI
 import AppKit
 
 extension SessionState {
-    var color: Color {
+    var nsColor: NSColor {
         switch self {
-        case .working: return Color(nsColor: .systemGreen)
-        case .waiting: return Color(nsColor: .systemOrange)
-        case .done: return Color(nsColor: .systemBlue)
+        case .working: return .systemGreen
+        case .waiting: return .systemOrange
+        case .done: return .systemBlue
         }
     }
+    var color: Color { Color(nsColor: nsColor) }
 
     var groupTitle: String {
         switch self {
@@ -63,31 +64,6 @@ struct DotClusterView: View {
     }
 }
 
-/// A single aggregate menu-bar element: a dot cluster, or a "● N" count for a
-/// state with more than 6 agents.
-struct AggregateElementView: View {
-    let element: AggregateElement
-
-    var body: some View {
-        Group {
-            switch element {
-            case .dots(let states):
-                DotClusterView(colors: states.map(\.color))
-            case .number(let state, let count):
-                HStack(spacing: 4) {
-                    Circle().fill(state.color).frame(width: 8, height: 8)
-                    Text("\(count)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .monospacedDigit()
-                }
-            }
-        }
-        .padding(.horizontal, 7)
-        .frame(height: 22)
-        .fixedSize()
-    }
-}
-
 /// Menu-bar content for a pinned session: state dot + a scrolling ticker of
 /// exactly what the agent is doing right now (its activity, plus its latest
 /// message for context) — like a news headline scan.
@@ -117,8 +93,8 @@ struct PinnedItemView: View {
             }
         }
         .padding(.horizontal, 6)
-        .frame(height: 22)
-        .fixedSize()
+        .frame(maxHeight: .infinity)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

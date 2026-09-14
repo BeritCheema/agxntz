@@ -35,20 +35,22 @@ final class StatusBarController: NSObject {
     private func syncAggregate() {
         let elements = store.aggregateElements
 
-        // The element count changes only when crossing the 6-agent split
-        // thresholds (rare) — rebuild the items then; otherwise update each
-        // item's hosted view in place so nothing flickers.
         if elements.count != aggregateItems.count {
             aggregateItems.forEach { NSStatusBar.system.removeStatusItem($0) }
             aggregateItems = elements.map { element in
                 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-                configure(item: item, rootView: AnyView(AggregateElementView(element: element)))
+                if let button = item.button {
+                    button.image = MenuBarImage.aggregate(element)
+                    button.target = self
+                    button.action = #selector(itemClicked(_:))
+                    button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+                }
                 return item
             }
             aggregateRendered = elements
         } else {
             for (i, element) in elements.enumerated() where aggregateRendered[i] != element {
-                swapHostedView(of: aggregateItems[i], rootView: AnyView(AggregateElementView(element: element)))
+                aggregateItems[i].button?.image = MenuBarImage.aggregate(element)
                 aggregateRendered[i] = element
             }
         }
@@ -105,13 +107,13 @@ final class StatusBarController: NSObject {
         let host = NSHostingView(rootView: rootView)
         host.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(host)
-        // Size the button to the content's width, but center the content
-        // vertically in the (taller) menu bar rather than stretching it to
-        // fill — which would top-align the fixed-height content.
+        // Fill the button; the SwiftUI content hugs its width and centers
+        // itself vertically (via frame(maxHeight:.infinity)).
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: button.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-            host.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            host.topAnchor.constraint(equalTo: button.topAnchor),
+            host.bottomAnchor.constraint(equalTo: button.bottomAnchor),
         ])
     }
 

@@ -75,13 +75,16 @@ final class DropdownPanel: NSPanel {
 
         let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         var x = buttonFrame.midX - size.width / 2
-        let y = buttonFrame.minY - size.height - 1
-
+        // Align the panel's top with the top of the app-content area (just
+        // below the menu bar) rather than the status button's own bottom,
+        // which sits inside the taller bar and leaves a gap.
+        var top = buttonFrame.minY
         if let screen = buttonWindow.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
+            top = visible.maxY
             x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
         }
-        setFrameOrigin(NSPoint(x: x, y: y))
+        setFrameOrigin(NSPoint(x: x, y: top - size.height))
     }
 
     private func installMonitors() {
