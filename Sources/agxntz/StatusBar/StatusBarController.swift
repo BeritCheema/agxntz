@@ -105,11 +105,13 @@ final class StatusBarController: NSObject {
         let host = NSHostingView(rootView: rootView)
         host.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(host)
+        // Size the button to the content's width, but center the content
+        // vertically in the (taller) menu bar rather than stretching it to
+        // fill — which would top-align the fixed-height content.
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: button.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-            host.topAnchor.constraint(equalTo: button.topAnchor),
-            host.bottomAnchor.constraint(equalTo: button.bottomAnchor),
+            host.centerYAnchor.constraint(equalTo: button.centerYAnchor),
         ])
     }
 
