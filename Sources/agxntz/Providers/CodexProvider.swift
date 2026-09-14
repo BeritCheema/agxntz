@@ -113,21 +113,16 @@ struct CodexProvider: AgentProvider {
         var state: SessionState
         if age < Tuning.workingWindow {
             state = .working
+        } else if lastKind == "task_complete" {
+            // Only an explicit task_complete/turn_aborted marks a turn done.
+            state = .done
         } else {
-            switch lastKind {
-            case "task_complete", "message":
-                state = .done
-            case "function_call":
-                // Codex auto-runs its tools (exec / wait on a background
-                // command). A pending call with no output yet is the agent
-                // running that command — working, not waiting on the user.
-                state = alive ? .working : .done
-            default:
-                // task_started / reasoning / user / function_call_output: a
-                // turn is in flight and generation writes nothing until it
-                // produces output — working, not waiting.
-                state = alive ? .working : .done
-            }
+            // Everything else is a turn still in flight: an assistant `message`
+            // is often a mid-turn progress update (Codex keeps reasoning and
+            // running tools after it), reasoning/task_started are pre-output,
+            // and a pending function_call is an auto-run tool executing. All
+            // are working while the process is alive.
+            state = alive ? .working : .done
         }
 
         if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
