@@ -16,6 +16,17 @@ project, what the agent is doing right now, elapsed time on the current task,
 and the agent/runtime as secondary info. Every row has a pin: pinned sessions
 get their own menu-bar item showing a colored dot plus the live activity text.
 
+## Install
+
+Download the latest `agxntz-<version>.zip` from the
+[**Releases**](https://github.com/BeritCheema/agxntz/releases) page, unzip it,
+and drag **agxntz.app** to your Applications folder. Launch it — a dot cluster
+appears in the menu bar when agents are active (nothing shows when idle). To
+quit, right-click the menu-bar item → **Quit**.
+
+Requires macOS 14 (Sonoma) or later. Releases are signed with a Developer ID
+and notarized by Apple, so they open without Gatekeeper warnings.
+
 ## Supported agents
 
 | Agent | Source watched | State quality |
@@ -84,6 +95,48 @@ Debug helpers:
 ```sh
 .build/debug/agxntz --scan   # one detection pass, printed to stdout
 ```
+
+## Cutting a release (maintainers)
+
+Releases are produced by GitHub Actions (`.github/workflows/release.yml`): push
+a version tag and CI builds on macOS, signs with your Developer ID, notarizes
+with Apple, and publishes a GitHub Release with the zipped app attached.
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This requires an [Apple Developer Program](https://developer.apple.com/programs/)
+membership and these repository secrets
+(**Settings → Secrets and variables → Actions**):
+
+| Secret | What it is |
+|---|---|
+| `MACOS_CERTIFICATE` | Base64 of your **Developer ID Application** certificate exported as `.p12` (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERTIFICATE_PWD` | Password you set when exporting the `.p12` |
+| `KEYCHAIN_PASSWORD` | Any random string (unlocks a throwaway CI keychain) |
+| `SIGNING_IDENTITY` | The identity name, e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `AC_APPLE_ID` | Your Apple ID email (for notarization) |
+| `AC_PASSWORD` | An [app-specific password](https://support.apple.com/102654) for that Apple ID |
+| `AC_TEAM_ID` | Your 10-character Apple Developer Team ID |
+
+To export the certificate: open **Keychain Access**, find your *Developer ID
+Application* certificate, right-click → **Export** as `.p12`. Find your Team ID
+and identity string at [developer.apple.com/account](https://developer.apple.com/account)
+(Membership) or via `security find-identity -v -p codesigning`.
+
+You can build a signed, notarized zip locally the same way CI does:
+
+```sh
+VERSION=0.1.0 \
+SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+AC_APPLE_ID="you@example.com" AC_PASSWORD="app-specific-pw" AC_TEAM_ID="TEAMID" \
+make release
+```
+
+With no signing env vars, `make release` just produces an ad-hoc-signed zip for
+local testing.
 
 ## Settings
 
