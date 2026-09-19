@@ -5,59 +5,58 @@ import Foundation
 struct ClaudeCodeProvider: AgentProvider {
     let kind = AgentKind.claude
     private let projectsDir = FileUtil.home.appendingPathComponent(".claude/projects")
+    // Memoize the expensive tail-read + JSON parse per file; unchanged
+    // transcripts (the common idle case) are re-classified cheaply each poll.
+    private let cache = FileDigestCache<ClaudeDigest>()
+    private let subCache = FileDigestCache<ClaudeDigest>()
+
+    /// Everything extracted from a transcript's bytes. State/age/activity are
+    /// derived from this each tick, so this is cached until the file changes.
+    struct ClaudeDigest {
+        var cwd: String?
+        var lastMeaningful: [String: Any]?   // nil => oversized-record fallback
+        var lastMeaningfulTS: Date?
+        var lastAssistant: [String: Any]?
+        var lastAssistantText: String?
+        var firstTimestamp: Date?
+        var lastPromptTS: Date?
+        var subLabel: String?                // sub-agent task label (from prompt)
+    }
 
     func scan(now: Date, processes: ProcessSnapshot) -> [AgentSession] {
         var sessions: [AgentSession] = []
+        var seen = Set<String>()
+        var subSeen = Set<String>()
         for projectDir in FileUtil.subdirectories(of: projectsDir) {
             for (file, mtime) in FileUtil.recentFiles(in: projectDir, suffix: ".jsonl", now: now) {
+                seen.insert(file.path)
                 let sessionID = file.deletingPathExtension().lastPathComponent
                 guard let session = parse(
                     file: file, mtime: mtime, sessionID: sessionID,
-                    now: now, processes: processes
+                    now: now, processes: processes, subSeen: &subSeen
                 ) else { continue }
                 sessions.append(session)
             }
         }
+        cache.prune(keeping: seen)
+        subCache.prune(keeping: subSeen)
         return sessions
     }
 
     private func parse(file: URL, mtime: Date, sessionID: String,
-                       now: Date, processes: ProcessSnapshot) -> AgentSession? {
-        // A single record can be huge (a screenshot or big file read is one
-        // JSONL line, seen up to ~800KB), so read a generous tail — a small
-        // window can land entirely inside one record and yield no parseable
-        // conversation line, which would drop an active session.
-        let lines = FileUtil.tailLines(of: file, maxBytes: 2 * 1024 * 1024)
-        guard !lines.isEmpty else { return nil }
+                       now: Date, processes: ProcessSnapshot,
+                       subSeen: inout Set<String>) -> AgentSession? {
+        guard let digest = cache.value(for: file, mtime: mtime, produce: {
+            Self.extract(file: file, isSub: false)
+        }) else { return nil }
 
-        var cwd: String?
-        var lastMeaningful: [String: Any]?
-        var lastMeaningfulTS: Date?
-        var lastAssistant: [String: Any]?
-        var firstTimestamp: Date?
-        var lastPromptTS: Date?
-        var lastAssistantText: String?
-
-        for line in lines {
-            guard let obj = FileUtil.json(line) else { continue }
-            if cwd == nil, let c = obj["cwd"] as? String { cwd = c }
-            if firstTimestamp == nil, let ts = obj["timestamp"] as? String {
-                firstTimestamp = ISO8601.parse(ts)
-            }
-            if obj["isSidechain"] as? Bool == true { continue }
-            guard let type = obj["type"] as? String else { continue }
-            if type == "user" || type == "assistant" || type == "system" {
-                lastMeaningful = obj
-                lastMeaningfulTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? lastMeaningfulTS
-                if type == "assistant" {
-                    lastAssistant = obj
-                    if let text = Self.assistantText(obj) { lastAssistantText = text }
-                }
-                if type == "user", Self.isHumanPrompt(obj) {
-                    lastPromptTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? lastPromptTS
-                }
-            }
-        }
+        let cwd = digest.cwd
+        let lastMeaningful = digest.lastMeaningful
+        let lastMeaningfulTS = digest.lastMeaningfulTS
+        let lastAssistant = digest.lastAssistant
+        let lastAssistantText = digest.lastAssistantText
+        let firstTimestamp = digest.firstTimestamp
+        let lastPromptTS = digest.lastPromptTS
 
         let alive = processes.isLive(kind, cwd: cwd, transcriptPath: file.path)
 
@@ -94,10 +93,13 @@ struct ClaudeCodeProvider: AgentProvider {
 
         // A standalone `system` record is only ever written at turn-end/idle
         // (stop_hook_summary, turn_duration, away_summary) — never during live
-        // generation. So a freshly-written system marker must NOT trip the
-        // "recent write = working" shortcut, or an idle away-summary flips a
-        // long-done session back to green for a few seconds.
+        // generation. A `/compact` likewise writes a `user` record flagged
+        // isCompactSummary: the compacted context sits idle awaiting the next
+        // real prompt — the agent is NOT generating. Neither must trip the
+        // "recent write = working" shortcut, or an idle marker (away-summary,
+        // or a fresh compaction) flips a done session back to green.
         let isTurnEndMarker = (lastMeaningful["type"] as? String) == "system"
+            || (lastMeaningful["isCompactSummary"] as? Bool) == true
 
         // A trailing AskUserQuestion is an interactive prompt blocked on the
         // user's answer — unambiguously "waiting" the instant it appears, so
@@ -106,9 +108,19 @@ struct ClaudeCodeProvider: AgentProvider {
         let pendingQuestion = (lastMeaningful["type"] as? String) == "assistant"
             && Self.lastToolName(lastMeaningful) == "AskUserQuestion"
 
+        // A trailing tool_use with no result is either a tool running or a
+        // permission prompt — indistinguishable in the transcript. The process
+        // tells them apart: a running command has a live shell child; a prompt
+        // the agent is blocked on does not.
+        let pendingToolUse = (lastMeaningful["type"] as? String) == "assistant"
+            && Self.contentTypes(of: lastMeaningful).contains("tool_use")
+        let executing = processes.hasRunningCommand(cwd: cwd)
+
         var state: SessionState
         if pendingQuestion {
             state = .waiting
+        } else if pendingToolUse {
+            state = Self.toolUseState(age: age, alive: alive, executing: executing)
         } else if age < Tuning.workingWindow && !isTurnEndMarker {
             state = .working
         } else {
@@ -125,16 +137,56 @@ struct ClaudeCodeProvider: AgentProvider {
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
             lastMessage: lastAssistantText?.messageSnippet,
             debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive)",
-            subAgents: scanSubAgents(parentDir: file.deletingPathExtension(), cwd: cwd, now: now, parentAlive: alive)
+            subAgents: scanSubAgents(parentDir: file.deletingPathExtension(), cwd: cwd, now: now, parentAlive: alive, subSeen: &subSeen)
         )
+    }
+
+    /// Reads a transcript's tail once and pulls out everything state derivation
+    /// needs. Pure over the file bytes, so its result is cached by mtime+size.
+    private static func extract(file: URL, isSub: Bool) -> ClaudeDigest? {
+        // A single record can be huge (a screenshot or big file read is one
+        // JSONL line, seen up to ~800KB), so read a generous tail — a small
+        // window can land entirely inside one record and yield no parseable
+        // conversation line, which would drop an active session.
+        let lines = FileUtil.tailLines(of: file, maxBytes: isSub ? 1024 * 1024 : 2 * 1024 * 1024)
+        guard !lines.isEmpty else { return nil }
+
+        var d = ClaudeDigest()
+        for line in lines {
+            guard let obj = FileUtil.json(line) else { continue }
+            if !isSub, d.cwd == nil, let c = obj["cwd"] as? String { d.cwd = c }
+            if d.firstTimestamp == nil, let ts = obj["timestamp"] as? String {
+                d.firstTimestamp = ISO8601.parse(ts)
+            }
+            if !isSub, obj["isSidechain"] as? Bool == true { continue }
+            guard let type = obj["type"] as? String else { continue }
+            let meaningful = isSub ? (type == "user" || type == "assistant")
+                                   : (type == "user" || type == "assistant" || type == "system")
+            guard meaningful else { continue }
+            d.lastMeaningful = obj
+            d.lastMeaningfulTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? d.lastMeaningfulTS
+            if type == "assistant" {
+                d.lastAssistant = obj
+                if let text = assistantText(obj) { d.lastAssistantText = text }
+            }
+            if type == "user" {
+                if !isSub, isHumanPrompt(obj) {
+                    d.lastPromptTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? d.lastPromptTS
+                }
+                // A sub-agent's first user message is its task prompt -> label.
+                if isSub, d.subLabel == nil, let prompt = userText(obj) { d.subLabel = prompt }
+            }
+        }
+        return d
     }
 
     /// Sub-agents live in <projectDir>/<sessionID>/subagents/agent-<id>.jsonl,
     /// one file per sub-agent, each a full sidechain transcript.
-    private func scanSubAgents(parentDir: URL, cwd: String?, now: Date, parentAlive: Bool) -> [AgentSession] {
+    private func scanSubAgents(parentDir: URL, cwd: String?, now: Date, parentAlive: Bool, subSeen: inout Set<String>) -> [AgentSession] {
         let dir = parentDir.appendingPathComponent("subagents")
         var out: [AgentSession] = []
         for (file, mtime) in FileUtil.recentFiles(in: dir, suffix: ".jsonl", now: now) {
+            subSeen.insert(file.path)
             if let sub = parseSubAgent(file: file, mtime: mtime, cwd: cwd, now: now, parentAlive: parentAlive) {
                 out.append(sub)
             }
@@ -146,32 +198,15 @@ struct ClaudeCodeProvider: AgentProvider {
     }
 
     private func parseSubAgent(file: URL, mtime: Date, cwd: String?, now: Date, parentAlive: Bool) -> AgentSession? {
-        let lines = FileUtil.tailLines(of: file, maxBytes: 1024 * 1024)
-        guard !lines.isEmpty else { return nil }
+        guard let digest = subCache.value(for: file, mtime: mtime, produce: {
+            Self.extract(file: file, isSub: true)
+        }), let lastMeaningful = digest.lastMeaningful else { return nil }
 
-        var lastMeaningful: [String: Any]?
-        var lastMeaningfulTS: Date?
-        var lastAssistant: [String: Any]?
-        var lastAssistantText: String?
-        var label: String?
-        var firstTS: Date?
-
-        for line in lines {
-            guard let obj = FileUtil.json(line), let type = obj["type"] as? String else { continue }
-            if firstTS == nil, let ts = obj["timestamp"] as? String { firstTS = ISO8601.parse(ts) }
-            guard type == "user" || type == "assistant" else { continue }
-            lastMeaningful = obj
-            lastMeaningfulTS = (obj["timestamp"] as? String).flatMap(ISO8601.parse) ?? lastMeaningfulTS
-            if type == "assistant" {
-                lastAssistant = obj
-                if let text = Self.assistantText(obj) { lastAssistantText = text }
-            }
-            // The first user message is the task prompt — use it as the label.
-            if type == "user", label == nil, let prompt = Self.userText(obj) {
-                label = prompt
-            }
-        }
-        guard let lastMeaningful else { return nil }
+        let lastMeaningfulTS = digest.lastMeaningfulTS
+        let lastAssistant = digest.lastAssistant
+        let lastAssistantText = digest.lastAssistantText
+        let label = digest.subLabel
+        let firstTS = digest.firstTimestamp
 
         let lastActivity = lastMeaningfulTS ?? mtime
         let age = now.timeIntervalSince(lastActivity)
@@ -240,12 +275,30 @@ struct ClaudeCodeProvider: AgentProvider {
         return joined.isEmpty ? nil : joined
     }
 
+    /// A pending tool call's state, told apart by process signal: a running
+    /// command has a live shell child (working); a permission prompt the agent
+    /// is blocked on does not (waiting). A brief start grace covers the moment
+    /// before the shell spawns so a real run doesn't flash orange.
+    private static func toolUseState(age: TimeInterval, alive: Bool, executing: Bool) -> SessionState {
+        if !alive { return .done }                          // process gone mid-tool
+        if executing { return .working }                    // command actively running
+        if age < Tuning.toolStartGrace { return .working }  // shell may still be spawning
+        return .waiting                                     // idle -> blocked on you
+    }
+
     private static func heuristicState(lastRecord: [String: Any], age: TimeInterval, alive: Bool) -> SessionState {
+        // A `/compact` summary is an idle turn-end marker (see parse): the
+        // conversation is compacted and waiting for the user, not generating.
+        if (lastRecord["isCompactSummary"] as? Bool) == true { return .done }
         switch lastRecord["type"] as? String {
         case "assistant":
-            // Assistant ended on a tool_use with no tool_result yet -> a
-            // permission prompt is likely pending.
-            if contentTypes(of: lastRecord).contains("tool_use") { return .waiting }
+            // Assistant ended on a tool_use with no tool_result yet. Pending
+            // tool calls are routed through toolUseState in parse (process
+            // signal), so this fallback only covers unusual cases: keep it
+            // conservative and treat it as a running tool.
+            if contentTypes(of: lastRecord).contains("tool_use") {
+                return alive ? .working : .done
+            }
             // A trailing text reply usually means the turn ended, but it can
             // also be a mid-turn status update with the next tool call still
             // being generated — debounce before declaring the turn done.
@@ -346,9 +399,57 @@ enum ISO8601 {
     }()
     private static let plain = ISO8601DateFormatter()
 
+    /// Transcript timestamps are a fixed UTC form — "2026-09-14T07:15:21.712Z"
+    /// (fractional seconds optional). NSISO8601DateFormatter routes every parse
+    /// through ICU (locale creation, number-affix parsing) and dominated CPU at
+    /// the 1s poll. This hand-rolls the common case with plain integer math and
+    /// only falls back to the formatter for anything off-format.
     static func parse(_ s: String) -> Date? {
-        withFractional.date(from: s) ?? plain.date(from: s)
+        if let d = fastParse(s) { return d }
+        return withFractional.date(from: s) ?? plain.date(from: s)
     }
+
+    private static func fastParse(_ s: String) -> Date? {
+        let u = s.utf8
+        guard u.count >= 20 else { return nil }
+        var it = u.makeIterator()
+        var buf = [UInt8](); buf.reserveCapacity(u.count)
+        while let b = it.next() { buf.append(b) }
+        // Positions: YYYY-MM-DDTHH:MM:SS[.fff]Z
+        func digits(_ start: Int, _ n: Int) -> Int? {
+            var v = 0
+            for i in start..<(start + n) {
+                let c = buf[i]
+                guard c >= 48, c <= 57 else { return nil }
+                v = v * 10 + Int(c - 48)
+            }
+            return v
+        }
+        guard buf[4] == 45, buf[7] == 45, buf[10] == 84 || buf[10] == 116,
+              buf[13] == 58, buf[16] == 58, buf.last == 90 || buf.last == 122 else { return nil }
+        guard let year = digits(0, 4), let month = digits(5, 2), let day = digits(8, 2),
+              let hour = digits(11, 2), let minute = digits(14, 2), let second = digits(17, 2)
+        else { return nil }
+        var frac = 0.0
+        if buf.count > 20, buf[19] == 46 {  // '.'
+            var i = 20, scale = 0.1
+            while i < buf.count, buf[i] >= 48, buf[i] <= 57 {
+                frac += Double(buf[i] - 48) * scale
+                scale /= 10; i += 1
+            }
+        }
+        var c = DateComponents()
+        c.year = year; c.month = month; c.day = day
+        c.hour = hour; c.minute = minute; c.second = second
+        guard let date = utcCalendar.date(from: c) else { return nil }
+        return date.addingTimeInterval(frac)
+    }
+
+    private static let utcCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal
+    }()
 
     static func string(from date: Date) -> String {
         withFractional.string(from: date)

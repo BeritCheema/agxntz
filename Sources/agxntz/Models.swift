@@ -109,6 +109,12 @@ enum Tuning {
 
     /// A write within this window means the agent is actively working.
     static let workingWindow: TimeInterval = 12
+
+    /// Brief grace after a tool call is written before its run/wait state is
+    /// judged by process signal — covers the moment between the tool_use record
+    /// and the command shell actually spawning, so a real run doesn't flash
+    /// orange for a tick. Short, so a genuine permission prompt turns orange fast.
+    static let toolStartGrace: TimeInterval = 5
     static var doneRetention: TimeInterval { config.doneRetention }
     static var killedRetention: TimeInterval { config.killedRetention }
     /// Session files untouched for longer than this are not scanned at all.

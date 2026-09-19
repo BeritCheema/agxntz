@@ -60,6 +60,28 @@ enum FileUtil {
         }
     }
 
+    /// The last newline-delimited line in the file's tail whose bytes contain
+    /// `needle`, decoded on its own. Finds the match by scanning raw bytes
+    /// (backwards) so huge unrelated records — e.g. Codex's ~300KB encrypted
+    /// reasoning blobs — are never decoded or JSON-parsed; only the one matching
+    /// line is turned into a String. Used to reach an assistant message that
+    /// sits ~1MB back without paying to decode everything in between.
+    static func lastLineContaining(_ needle: String, in url: URL, maxBytes: Int) -> String? {
+        guard let needleData = needle.data(using: .utf8),
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        try? handle.seek(toOffset: offset)
+        guard let data = try? handle.readToEnd(),
+              let match = data.range(of: needleData, options: .backwards) else { return nil }
+
+        let newline = UInt8(ascii: "\n")
+        let start = data[..<match.lowerBound].lastIndex(of: newline).map { data.index(after: $0) } ?? data.startIndex
+        let end = data[match.upperBound...].firstIndex(of: newline) ?? data.endIndex
+        return String(data: data[start..<end], encoding: .utf8)
+    }
+
     /// First complete line of a file. Reads in growing chunks: some agents
     /// write very large metadata first lines (Codex embeds its full base
     /// instructions, >18KB), so a fixed small read would truncate mid-line

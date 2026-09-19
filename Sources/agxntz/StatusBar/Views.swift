@@ -247,6 +247,15 @@ struct SessionRow: View {
                                 .font(.system(size: 8, weight: .semibold))
                                 .foregroundStyle(.tertiary)
                         }
+                        // Hit-test the whole bar, not just the dots: with plain
+                        // button style only the drawn circles/chevron are
+                        // clickable, so clicks in the gaps (and the target keeps
+                        // shifting as sub-agents spawn/die) fall through. A clear
+                        // rectangle over the bounds makes it all clickable. Only
+                        // horizontal padding — vertical would shift the row's
+                        // firstTextBaseline alignment and drop the dots low.
+                        .padding(.horizontal, 3)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("\(session.subAgents.count) sub-agent\(session.subAgents.count == 1 ? "" : "s")")
@@ -302,11 +311,22 @@ struct SubAgentRow: View {
                 Text(session.projectName)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                Text(session.state == .done ? "finished" : session.activity)
-                    .font(.system(size: 11))
-                    .foregroundStyle(session.state == .done ? .secondary : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                // Activity and the sub-agent's latest message on one line, the
+                // message to the right of the activity rather than stacked below.
+                HStack(spacing: 5) {
+                    Text(session.state == .done ? "finished" : session.activity)
+                        .font(.system(size: 11))
+                        .foregroundStyle(session.state == .done ? .secondary : .primary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    if let message = session.lastMessage, !message.isEmpty {
+                        Text(message)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
             }
 
             Spacer(minLength: 8)

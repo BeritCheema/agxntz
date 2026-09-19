@@ -9,14 +9,30 @@ struct ProcessSnapshot {
     private let kindsRunning: Set<AgentKind>
     private let cwdsByKind: [AgentKind: Set<String>]
     private let openFiles: Set<String>
+    // Working directories of agent processes that currently have a live command
+    // shell child — i.e. a Bash/command tool actually executing right now.
+    private let executingCwds: Set<String>
 
-    init(kindsRunning: Set<AgentKind>, cwdsByKind: [AgentKind: Set<String>], openFiles: Set<String>) {
+    init(kindsRunning: Set<AgentKind>, cwdsByKind: [AgentKind: Set<String>], openFiles: Set<String>,
+         executingCwds: Set<String> = []) {
         self.kindsRunning = kindsRunning
         self.cwdsByKind = cwdsByKind
         self.openFiles = openFiles
+        self.executingCwds = executingCwds
     }
 
     func isRunning(_ kind: AgentKind) -> Bool { kindsRunning.contains(kind) }
+
+    /// Whether an agent process at (or above) this session's cwd currently has a
+    /// live command shell running — a tool actively executing. Distinguishes a
+    /// running tool (working) from an agent idle on a permission prompt
+    /// (waiting), which look identical in the transcript.
+    func hasRunningCommand(cwd: String?) -> Bool {
+        guard let cwd, !executingCwds.isEmpty else { return false }
+        let target = Self.normalize(cwd)
+        for c in executingCwds where target == c || target.hasPrefix(c + "/") { return true }
+        return false
+    }
 
     /// Best-effort: is this specific session backed by a live process.
     /// Signals, strongest first:
@@ -48,22 +64,52 @@ struct ProcessSnapshot {
         URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 
+    // Spawning `ps` + `lsof` every poll (once per second) was a large share of
+    // idle CPU. Process liveness changes over minutes and the retention windows
+    // are minutes, so a snapshot is cached and only rebuilt every few seconds.
+    nonisolated(unsafe) private static var cached: ProcessSnapshot?
+    nonisolated(unsafe) private static var cachedAt: Date = .distantPast
+    private static let cacheTTL: TimeInterval = 5
+    private static let cacheLock = NSLock()
+
     static func capture() -> ProcessSnapshot {
-        guard let psOutput = run("/bin/ps", ["-axo", "pid=,command="]) else {
+        cacheLock.lock()
+        if let cached, Date().timeIntervalSince(cachedAt) < cacheTTL {
+            defer { cacheLock.unlock() }
+            return cached
+        }
+        cacheLock.unlock()
+
+        let snapshot = captureFresh()
+        cacheLock.lock()
+        cached = snapshot
+        cachedAt = Date()
+        cacheLock.unlock()
+        return snapshot
+    }
+
+    private static func captureFresh() -> ProcessSnapshot {
+        // ppid lets us see each agent process's children — a running command
+        // shell means a tool is actively executing.
+        guard let psOutput = run("/bin/ps", ["-axo", "pid=,ppid=,command="]) else {
             return ProcessSnapshot(kindsRunning: Set(AgentKind.allCases), cwdsByKind: [:], openFiles: [])
         }
 
         var kindByPid: [String: AgentKind] = [:]
         var kindsRunning = Set<AgentKind>()
+        var procs: [(pid: String, ppid: String, command: Substring)] = []
         let nameToKind: [String: AgentKind] = Dictionary(
             AgentKind.allCases.flatMap { kind in kind.processNames.map { ($0, kind) } },
             uniquingKeysWith: { a, _ in a }
         )
         for line in psOutput.split(separator: "\n") {
-            let tokens = line.drop { $0 == " " }.split(separator: " ", omittingEmptySubsequences: true)
-            guard let pid = tokens.first.map(String.init) else { continue }
+            let parts = line.drop { $0 == " " }.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+            guard parts.count >= 2 else { continue }
+            let pid = String(parts[0]), ppid = String(parts[1])
+            let command = parts.count >= 3 ? parts[2] : ""
+            procs.append((pid, ppid, command))
             var matched: AgentKind?
-            for token in tokens.dropFirst().prefix(2) {
+            for token in command.split(separator: " ").prefix(2) {
                 let base = (String(token) as NSString).lastPathComponent
                 if let kind = nameToKind[base] { matched = kind; break }
             }
@@ -77,10 +123,26 @@ struct ProcessSnapshot {
             return ProcessSnapshot(kindsRunning: [], cwdsByKind: [:], openFiles: [])
         }
 
-        // One lsof over the agent pids yields both cwds (fd "cwd") and open
-        // transcript files (numeric fds pointing at .jsonl/.json).
+        // Agent pids that have a live command-shell child: the agent is running
+        // a Bash/command tool right now (idle agents waiting on a permission
+        // prompt have no such child). Persistent helpers (caffeinate, LSP) are
+        // not shells, so they don't count.
+        let shells: Set<String> = ["sh", "bash", "zsh", "dash", "fish"]
+        var executingPids = Set<String>()
+        for p in procs where kindByPid[p.ppid] != nil {
+            let firstTok = p.command.split(separator: " ").first.map(String.init) ?? ""
+            let base = (firstTok as NSString).lastPathComponent
+            if shells.contains(base) || p.command.contains("shell-snapshots") {
+                executingPids.insert(p.ppid)
+            }
+        }
+
+        // One lsof over the agent pids yields cwds (fd "cwd"), open transcript
+        // files (numeric fds pointing at .jsonl/.json), and — via a per-pid cwd
+        // map — the cwds of the processes currently executing a command.
         var cwdsByKind: [AgentKind: Set<String>] = [:]
         var openFiles = Set<String>()
+        var pidCwd: [String: String] = [:]
         let pidList = kindByPid.keys.joined(separator: ",")
         if let lsof = run("/usr/sbin/lsof", ["-a", "-p", pidList, "-Fpfn"]) {
             var pid: String?
@@ -94,7 +156,9 @@ struct ProcessSnapshot {
                 case "n":
                     guard let pid, let kind = kindByPid[pid] else { continue }
                     if fd == "cwd" {
-                        cwdsByKind[kind, default: []].insert(normalize(value))
+                        let n = normalize(value)
+                        cwdsByKind[kind, default: []].insert(n)
+                        pidCwd[pid] = n
                     } else if value.hasSuffix(".jsonl") || value.hasSuffix(".json") {
                         openFiles.insert(normalize(value))
                     }
@@ -103,7 +167,9 @@ struct ProcessSnapshot {
             }
         }
 
-        return ProcessSnapshot(kindsRunning: kindsRunning, cwdsByKind: cwdsByKind, openFiles: openFiles)
+        let executingCwds = Set(executingPids.compactMap { pidCwd[$0] })
+        return ProcessSnapshot(kindsRunning: kindsRunning, cwdsByKind: cwdsByKind,
+                               openFiles: openFiles, executingCwds: executingCwds)
     }
 
     private static func run(_ path: String, _ arguments: [String]) -> String? {
