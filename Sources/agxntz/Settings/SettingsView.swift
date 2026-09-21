@@ -9,7 +9,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                overview
                 ticker
                 dots
                 retention
@@ -20,22 +19,10 @@ struct SettingsView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 520, height: 640)
+        .frame(width: 520, height: 580)
     }
 
     // MARK: Sections
-
-    private var overview: some View {
-        Card(title: "Live overview") {
-            HStack(spacing: 24) {
-                ForEach([SessionState.working, .waiting, .done], id: \.rawValue) { state in
-                    StatTile(color: state.color, label: state.groupTitle.capitalized,
-                             value: store.sessions(in: state).count)
-                }
-                StatTile(color: .secondary, label: "Total", value: store.sessions.count)
-            }
-        }
-    }
 
     private var ticker: some View {
         Card(title: "Pinned ticker") {
@@ -85,19 +72,20 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 ForEach(AgentKind.allCases, id: \.rawValue) { kind in
                     let count = store.sessions.filter { $0.kind == kind }.count
-                    HStack {
-                        Toggle(isOn: Binding(
-                            get: { settings.isEnabled(kind) },
-                            set: { settings.setEnabled(kind, $0) }
-                        )) {
-                            Text(kind.rawValue).font(.system(size: 13))
-                        }
-                        .toggleStyle(.switch)
-                        Spacer()
+                    HStack(spacing: 10) {
+                        Text(kind.rawValue).font(.system(size: 13))
+                        Spacer(minLength: 8)
                         Text(count > 0 ? "\(count) active" : "—")
                             .font(.system(size: 12)).foregroundStyle(.secondary)
+                        Toggle("", isOn: Binding(
+                            get: { settings.isEnabled(kind) },
+                            set: { settings.setEnabled(kind, $0) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 7)
                     if kind != AgentKind.allCases.last { Divider() }
                 }
             }
@@ -145,21 +133,6 @@ private struct Card<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.05))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-    }
-}
-
-private struct StatTile: View {
-    let color: Color
-    let label: String
-    let value: Int
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Circle().fill(color).frame(width: 8, height: 8)
-                Text(label).font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            Text("\(value)").font(.system(size: 26, weight: .semibold)).monospacedDigit()
         }
     }
 }
