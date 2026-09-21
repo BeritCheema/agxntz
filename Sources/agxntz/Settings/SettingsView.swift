@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// Accent used for interactive controls in Settings (slider tracks, toggle "on"
+/// state) — a soft pastel lime.
+let settingsAccent = Color(red: 206 / 255, green: 245 / 255, blue: 160 / 255)
+
 /// The Settings window: a single scrolling page of cards — overview, appearance,
 /// behavior, agents, and pinned sessions.
 struct SettingsView: View {
@@ -41,6 +45,7 @@ struct SettingsView: View {
                     Text("Dots before splitting").font(.system(size: 13))
                     Spacer()
                     Text("\(settings.maxDots)").font(.system(size: 13, weight: .medium)).monospacedDigit()
+                        .textSelection(.enabled)
                 }
             }
             Text("Up to this many agent dots share one menu-bar element; beyond it the largest group splits off.")
@@ -77,6 +82,7 @@ struct SettingsView: View {
                         Spacer(minLength: 8)
                         Text(count > 0 ? "\(count) active" : "—")
                             .font(.system(size: 12)).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                         Toggle("", isOn: Binding(
                             get: { settings.isEnabled(kind) },
                             set: { settings.setEnabled(kind, $0) }
@@ -84,6 +90,7 @@ struct SettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.small)
+                        .tint(settingsAccent)
                     }
                     .padding(.vertical, 7)
                     if kind != AgentKind.allCases.last { Divider() }
@@ -147,10 +154,11 @@ private struct SliderRow: View {
         HStack {
             Text(label).font(.system(size: 13))
             Spacer()
-            Slider(value: $value, in: range).frame(width: 200)
+            Slider(value: $value, in: range).frame(width: 200).tint(settingsAccent)
             Text("\(String(format: format, value)) \(unit)")
                 .font(.system(size: 12)).monospacedDigit()
                 .foregroundStyle(.secondary)
+                .textSelection(.enabled)
                 .frame(width: 60, alignment: .trailing)
         }
     }
