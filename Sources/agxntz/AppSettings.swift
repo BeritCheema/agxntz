@@ -38,7 +38,7 @@ final class AppSettings: ObservableObject {
     func apply() {
         Tuning.config.doneRetention = doneRetentionMinutes * 60
         Tuning.config.killedRetention = killedRetentionMinutes * 60
-        Tuning.config.maxDots = max(1, min(6, maxDots))
+        Tuning.config.maxDots = max(1, maxDots)
     }
 
     func isEnabled(_ kind: AgentKind) -> Bool { !disabledAgents.contains(kind.rawValue) }

@@ -19,7 +19,7 @@ final class SettingsWindowController {
         let hosting = NSHostingController(rootView: SettingsView(store: store))
         let win = NSWindow(contentViewController: hosting)
         win.title = "agxntz Settings"
-        win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        win.styleMask = [.titled, .closable, .miniaturizable]
         win.isReleasedWhenClosed = false
         win.center()
         window = win

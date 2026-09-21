@@ -23,21 +23,44 @@ final class StatusBarController: NSObject {
                 DispatchQueue.main.async { self?.sync() }
             }
             .store(in: &cancellables)
-        // React to settings changes: restart polling, and force a full menu-bar
-        // rebuild so ticker speed/size and dot cap take effect immediately.
-        AppSettings.shared.objectWillChange
+        // React to settings changes surgically. A single catch-all that tears
+        // down every status item on any change breaks pins when a slider fires
+        // continuously during a drag — so each setting drives only what it must.
+        let settings = AppSettings.shared
+
+        // Poll interval: just restart the timer.
+        settings.$pollInterval.dropFirst().removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.store.restartTimer() }
+            .store(in: &cancellables)
+
+        // Dot cap: changes aggregate packing, so rebuild the aggregate items.
+        settings.$maxDots.dropFirst().removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.store.restartTimer()
-                    self.pinnedRendered.removeAll()
-                    self.aggregateRendered.removeAll()
-                    self.aggregateItems.forEach { NSStatusBar.system.removeStatusItem($0) }
-                    self.aggregateItems.removeAll()
-                    self.sync()
-                }
+                guard let self else { return }
+                self.aggregateRendered.removeAll()
+                self.aggregateItems.forEach { NSStatusBar.system.removeStatusItem($0) }
+                self.aggregateItems.removeAll()
+                self.sync()
             }
+            .store(in: &cancellables)
+
+        // Ticker speed / size: re-render only the pinned hosted views in place —
+        // no status-item teardown, no timer restart. Editing these must never
+        // disturb the pins themselves.
+        Publishers.Merge(
+            settings.$tickerSpeed.dropFirst().map { _ in () },
+            settings.$tickerFontSize.dropFirst().map { _ in () }
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] in self?.rerenderPinned() }
+        .store(in: &cancellables)
+
+        // Enable/disable agents: reflect on the next scan immediately.
+        settings.$disabledAgents.dropFirst().removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.store.refresh() }
             .store(in: &cancellables)
         sync()
     }
@@ -99,6 +122,17 @@ final class StatusBarController: NSObject {
                 pinnedItems[session.id] = item
                 pinnedRendered[session.id] = session
             }
+        }
+    }
+
+    /// Re-render each existing pinned item's hosted view so it picks up new
+    /// ticker speed/size, without removing or recreating the status items —
+    /// the pin stays exactly where it is.
+    private func rerenderPinned() {
+        for session in store.pinnedSessions {
+            guard let item = pinnedItems[session.id] else { continue }
+            swapHostedView(of: item, rootView: AnyView(PinnedItemView(session: session)))
+            pinnedRendered[session.id] = session
         }
     }
 

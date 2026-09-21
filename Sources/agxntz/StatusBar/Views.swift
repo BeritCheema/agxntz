@@ -50,17 +50,20 @@ struct DotClusterView: View {
         .frame(width: width, height: height)
     }
 
-    /// Top-left dot origins (points) for each count. Odd counts add a
-    /// vertically-centered apex one unit to the right of the base.
+    /// Top-left dot origins (points) for any count, laid out as a two-row
+    /// pyramid: dots fill a top row then a bottom row, left to right; an odd
+    /// count places its last dot as a vertically-centered apex to the right of
+    /// the rows. Uniform `s` spacing throughout. Fully general — no per-count
+    /// special cases — so it scales to as many dots as configured.
     static func positions(_ n: Int) -> [(CGFloat, CGFloat)] {
-        switch n {
-        case 1:  return [(0, 0)]
-        case 2:  return [(0, 0), (0, s)]
-        case 3:  return [(0, 0), (0, s), (s, s / 2)]
-        case 4:  return [(0, 0), (s, 0), (0, s), (s, s)]
-        case 5:  return [(0, 0), (s, 0), (0, s), (s, s), (2 * s, s / 2)]
-        default: return [(0, 0), (s, 0), (2 * s, 0), (0, s), (s, s), (2 * s, s)]
-        }
+        guard n > 1 else { return [(0, 0)] }
+        let odd = n % 2 == 1
+        let cols = (odd ? n - 1 : n) / 2       // columns in the two full rows
+        var out: [(CGFloat, CGFloat)] = []
+        for c in 0..<cols { out.append((CGFloat(c) * s, 0)) }      // top row
+        for c in 0..<cols { out.append((CGFloat(c) * s, s)) }      // bottom row
+        if odd { out.append((CGFloat(cols) * s, s / 2)) }          // centered apex
+        return out
     }
 }
 
