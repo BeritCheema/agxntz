@@ -113,25 +113,28 @@ membership and these repository secrets
 
 | Secret | What it is |
 |---|---|
-| `MACOS_CERTIFICATE` | Base64 of your **Developer ID Application** certificate exported as `.p12` (`base64 -i cert.p12 \| pbcopy`) |
-| `MACOS_CERTIFICATE_PWD` | Password you set when exporting the `.p12` |
+| `MACOS_CERTIFICATE` | Base64 of the **Developer ID Application** certificate exported as `.p12` (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERTIFICATE_PWD` | Password of that `.p12` |
 | `KEYCHAIN_PASSWORD` | Any random string (unlocks a throwaway CI keychain) |
 | `SIGNING_IDENTITY` | The identity name, e.g. `Developer ID Application: Your Name (TEAMID)` |
-| `AC_APPLE_ID` | Your Apple ID email (for notarization) |
-| `AC_PASSWORD` | An [app-specific password](https://support.apple.com/102654) for that Apple ID |
-| `AC_TEAM_ID` | Your 10-character Apple Developer Team ID |
+| `AC_API_KEY_P8` | Base64 of your App Store Connect API key `.p8` (`base64 -i AuthKey_XXXX.p8 \| pbcopy`) |
+| `AC_API_KEY_ID` | The API key ID (the `XXXX` in `AuthKey_XXXX.p8`) |
+| `AC_API_ISSUER_ID` | The App Store Connect issuer ID (a UUID) |
 
-To export the certificate: open **Keychain Access**, find your *Developer ID
-Application* certificate, right-click → **Export** as `.p12`. Find your Team ID
-and identity string at [developer.apple.com/account](https://developer.apple.com/account)
-(Membership) or via `security find-identity -v -p codesigning`.
+Notarization uses an [App Store Connect API key](https://appstoreconnect.apple.com/access/integrations/api)
+(Keys tab → generate a key with the *Developer* role → download the `.p8`; the
+issuer ID is shown on that page). Export the signing certificate from
+**Keychain Access** → your *Developer ID Application* cert → right-click →
+**Export** as `.p12`.
 
-You can build a signed, notarized zip locally the same way CI does:
+You can build a signed, notarized zip locally the same way CI does — point at
+the `.p8` on disk instead of base64:
 
 ```sh
 VERSION=0.1.0 \
 SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-AC_APPLE_ID="you@example.com" AC_PASSWORD="app-specific-pw" AC_TEAM_ID="TEAMID" \
+AC_API_KEY_ID="XXXX" AC_API_ISSUER_ID="issuer-uuid" \
+AC_API_KEY_PATH="$HOME/private_keys/AuthKey_XXXX.p8" \
 make release
 ```
 

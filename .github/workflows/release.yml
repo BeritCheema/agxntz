@@ -45,9 +45,9 @@ jobs:
         env:
           VERSION: ${{ github.event.inputs.version || github.ref_name }}
           SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
-          AC_APPLE_ID: ${{ secrets.AC_APPLE_ID }}
-          AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
-          AC_TEAM_ID: ${{ secrets.AC_TEAM_ID }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
         run: ./scripts/package.sh
 
       - name: Publish GitHub Release
