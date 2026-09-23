@@ -90,7 +90,9 @@ final class DropdownPanel: NSPanel {
     private func installMonitors() {
         // Any click outside the panel dismisses it, like a menu.
         let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.dismiss() }
+            // Global monitors fire on the main thread; assume isolation to call
+            // dismiss() directly instead of a Task that captures self.
+            MainActor.assumeIsolated { self?.dismiss() }
         }
         let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self else { return event }

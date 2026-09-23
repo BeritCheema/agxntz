@@ -19,9 +19,7 @@ final class StatusBarController: NSObject {
         super.init()
         store.objectWillChange
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                DispatchQueue.main.async { self?.sync() }
-            }
+            .sink { [weak self] _ in self?.sync() }
             .store(in: &cancellables)
         // React to settings changes surgically. A single catch-all that tears
         // down every status item on any change breaks pins when a slider fires

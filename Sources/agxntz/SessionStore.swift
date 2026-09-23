@@ -35,8 +35,11 @@ final class SessionStore: ObservableObject {
     func restartTimer() {
         timer?.invalidate()
         let interval = max(0.25, AppSettings.shared.pollInterval)
+        // The timer is added to RunLoop.main, so its block fires on the main
+        // thread; assume main-actor isolation to call refresh() directly rather
+        // than spawning a Task (which trips strict-concurrency self capture).
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            MainActor.assumeIsolated { self?.refresh() }
         }
         t.tolerance = min(0.5, interval / 2)
         RunLoop.main.add(t, forMode: .common)
