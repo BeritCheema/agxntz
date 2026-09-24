@@ -4,9 +4,9 @@ import AppKit
 extension SessionState {
     var nsColor: NSColor {
         switch self {
-        case .working: return .systemGreen
-        case .waiting: return .systemOrange
-        case .done: return .systemBlue
+        case .working: return Palette.working
+        case .waiting: return Palette.waiting
+        case .done: return Palette.done
         }
     }
     var color: Color { Color(nsColor: nsColor) }

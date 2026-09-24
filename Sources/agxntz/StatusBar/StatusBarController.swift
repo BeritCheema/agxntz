@@ -55,6 +55,19 @@ final class StatusBarController: NSObject {
         .sink { [weak self] in self?.rerenderPinned() }
         .store(in: &cancellables)
 
+        // State colors: redraw the dot images and pinned items in place.
+        Publishers.Merge3(
+            settings.$workingColorHex.dropFirst().map { _ in () },
+            settings.$waitingColorHex.dropFirst().map { _ in () },
+            settings.$doneColorHex.dropFirst().map { _ in () }
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] in
+            self?.rerenderAggregate()
+            self?.rerenderPinned()
+        }
+        .store(in: &cancellables)
+
         // Enable/disable agents: reflect on the next scan immediately.
         settings.$disabledAgents.dropFirst().removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -121,6 +134,17 @@ final class StatusBarController: NSObject {
                 pinnedRendered[session.id] = session
             }
         }
+    }
+
+    /// Redraw every aggregate dot image (e.g. after a color change) without
+    /// removing or recreating the status items.
+    private func rerenderAggregate() {
+        let elements = store.aggregateElements
+        guard elements.count == aggregateItems.count else { sync(); return }
+        for (i, element) in elements.enumerated() {
+            aggregateItems[i].button?.image = MenuBarImage.aggregate(element)
+        }
+        aggregateRendered = elements
     }
 
     /// Re-render each existing pinned item's hosted view so it picks up new

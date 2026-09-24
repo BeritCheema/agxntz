@@ -15,6 +15,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 ticker
                 dots
+                colors
                 retention
                 polling
                 agents
@@ -23,7 +24,7 @@ struct SettingsView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 520, height: 580)
+        .frame(width: 520, height: 640)
     }
 
     // MARK: Sections
@@ -50,6 +51,28 @@ struct SettingsView: View {
             }
             Text("Up to this many agent dots share one menu-bar element; beyond it the largest group splits off.")
                 .font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 4)
+        }
+    }
+
+    private var colors: some View {
+        Card(title: "State colors") {
+            ColorRow(label: "Working", hex: $settings.workingColorHex, fallback: Palette.defaultWorking)
+            Divider().padding(.vertical, 4)
+            ColorRow(label: "Waiting", hex: $settings.waitingColorHex, fallback: Palette.defaultWaiting)
+            Divider().padding(.vertical, 4)
+            ColorRow(label: "Done", hex: $settings.doneColorHex, fallback: Palette.defaultDone)
+            HStack {
+                Text("Used for the menu-bar dots, pinned items, and dropdown.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") { settings.resetStateColors() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12))
+                    .disabled(settings.workingColorHex == nil
+                              && settings.waitingColorHex == nil
+                              && settings.doneColorHex == nil)
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -140,6 +163,32 @@ private struct Card<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.05))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+}
+
+/// A state-color row: label, the current hex (selectable), and a picker.
+/// Stores "#RRGGBB"; a nil value shows the system default for that state.
+private struct ColorRow: View {
+    let label: String
+    @Binding var hex: String?
+    let fallback: NSColor
+
+    private var current: NSColor { hex.flatMap(NSColor.init(hex:)) ?? fallback }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(label).font(.system(size: 13))
+            Spacer()
+            Text(hex ?? "Default")
+                .font(.system(size: 12)).monospacedDigit()
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            ColorPicker("", selection: Binding(
+                get: { Color(nsColor: current) },
+                set: { hex = NSColor($0).hexString }
+            ), supportsOpacity: false)
+            .labelsHidden()
         }
     }
 }
