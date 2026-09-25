@@ -114,7 +114,7 @@ struct ClaudeCodeProvider: AgentProvider {
         // the agent is blocked on does not.
         let pendingToolUse = (lastMeaningful["type"] as? String) == "assistant"
             && Self.contentTypes(of: lastMeaningful).contains("tool_use")
-        let executing = processes.hasRunningCommand(cwd: cwd)
+        let executing = processes.hasRunningCommand(kind, cwd: cwd)
 
         var state: SessionState
         if pendingQuestion {
@@ -127,17 +127,35 @@ struct ClaudeCodeProvider: AgentProvider {
             state = Self.heuristicState(lastRecord: lastMeaningful, age: age, alive: alive)
         }
 
+        // A session isn't finished while its sub-agents are still running: the
+        // parent's own transcript can end on a reply (done) or sit on the
+        // Task/Agent call that spawned them (which the permission heuristic
+        // would read as waiting). Either way it's really working — waiting on
+        // its sub-agents, not on the user. A genuine prompt (AskUserQuestion,
+        // or a permission wait on some other tool) is left as waiting.
+        let subAgents = scanSubAgents(parentDir: file.deletingPathExtension(), cwd: cwd, now: now,
+                                      parentAlive: alive, subSeen: &subSeen)
+        let runningSubs = subAgents.filter { $0.state == .working }.count
+        var activityOverride: String?
+        if runningSubs > 0 {
+            let delegating = pendingToolUse && ["Task", "Agent"].contains(Self.lastToolName(lastMeaningful) ?? "")
+            if state == .done || (state == .waiting && delegating) {
+                state = .working
+                activityOverride = "waiting on \(runningSubs) subagent\(runningSubs == 1 ? "" : "s")"
+            }
+        }
+
         if Tuning.shouldDrop(state: state, alive: alive, age: age) { return nil }
 
-        let activity = Self.activity(state: state, lastAssistant: lastAssistant)
+        let activity = activityOverride ?? Self.activity(state: state, lastAssistant: lastAssistant)
         let project = (cwd ?? Self.decodeDir(file.deletingLastPathComponent().lastPathComponent)).projectNameFromPath
 
         return AgentSession(
             id: "claude:\(sessionID)", kind: kind, projectName: project, cwd: cwd,
             activity: activity, state: state, startedAt: startedAt, lastActivityAt: lastActivity,
             lastMessage: lastAssistantText?.messageSnippet,
-            debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive)",
-            subAgents: scanSubAgents(parentDir: file.deletingPathExtension(), cwd: cwd, now: now, parentAlive: alive, subSeen: &subSeen)
+            debugInfo: "lastType=\(lastMeaningful["type"] as? String ?? "nil") age=\(Int(age))s alive=\(alive) subsRunning=\(runningSubs)",
+            subAgents: subAgents
         )
     }
 
@@ -350,7 +368,7 @@ struct ClaudeCodeProvider: AgentProvider {
         if let toolUse = content.last(where: { $0["type"] as? String == "tool_use" }),
            let name = toolUse["name"] as? String {
             let input = toolUse["input"] as? [String: Any] ?? [:]
-            // Interactive question: show the question itself, not "wants to …".
+            // Interactive question: show the question itself, not an approval prompt.
             if name == "AskUserQuestion" {
                 if let questions = input["questions"] as? [[String: Any]],
                    let q = questions.first?["question"] as? String, !q.isEmpty {
@@ -359,7 +377,9 @@ struct ClaudeCodeProvider: AgentProvider {
                 return "asking you a question"
             }
             let described = describeTool(name: name, input: input)
-            return state == .waiting ? "wants to \(described)" : described
+            // Descriptions are mostly gerunds ("editing X"), so prefix with a
+            // label rather than "wants to …" (which read "wants to editing X").
+            return state == .waiting ? "needs approval: \(described)" : described
         }
         if state == .waiting { return "waiting for you" }
         return "responding"

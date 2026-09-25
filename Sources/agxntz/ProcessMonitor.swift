@@ -27,11 +27,20 @@ struct ProcessSnapshot {
     /// live command shell running — a tool actively executing. Distinguishes a
     /// running tool (working) from an agent idle on a permission prompt
     /// (waiting), which look identical in the transcript.
-    func hasRunningCommand(cwd: String?) -> Bool {
-        guard let cwd, !executingCwds.isEmpty else { return false }
+    ///
+    /// The session is attributed to the agent process whose cwd is the *most
+    /// specific* match (equal to, or the deepest ancestor of, the session cwd).
+    /// Matching any ancestor would let one agent launched in a parent folder
+    /// (e.g. ~/Projects) that is running a command make every session beneath
+    /// it look busy, masking their real permission prompts.
+    func hasRunningCommand(_ kind: AgentKind, cwd: String?) -> Bool {
+        guard let cwd, !executingCwds.isEmpty, let cwds = cwdsByKind[kind] else { return false }
         let target = Self.normalize(cwd)
-        for c in executingCwds where target == c || target.hasPrefix(c + "/") { return true }
-        return false
+        let owner = cwds
+            .filter { target == $0 || target.hasPrefix($0 + "/") }
+            .max { $0.count < $1.count }
+        guard let owner else { return false }
+        return executingCwds.contains(owner)
     }
 
     /// Best-effort: is this specific session backed by a live process.
