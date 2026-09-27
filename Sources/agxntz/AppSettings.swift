@@ -23,6 +23,12 @@ final class AppSettings: ObservableObject {
     @Published var killedRetentionMinutes: Double { didSet { save("killedRetentionMin", killedRetentionMinutes); apply() } }
     @Published var pollInterval: Double { didSet { save("pollInterval", pollInterval) } }
 
+    // Usage count opt-out (default on). See UsagePing.
+    @Published var shareUsageCount: Bool { didSet { save("shareUsageCount", shareUsageCount) } }
+
+    /// Stable, anonymous per-Mac ID for the usage count. See DeviceID.
+    var installID: String { DeviceID.value }
+
     // Agents (store disabled rawValues; default: all enabled)
     @Published var disabledAgents: Set<String> { didSet { d.set(Array(disabledAgents), forKey: "disabledAgents") } }
 
@@ -36,6 +42,7 @@ final class AppSettings: ObservableObject {
         doneRetentionMinutes = (d.object(forKey: "doneRetentionMin") as? Double) ?? 30
         killedRetentionMinutes = (d.object(forKey: "killedRetentionMin") as? Double) ?? 2
         pollInterval = (d.object(forKey: "pollInterval") as? Double) ?? 1
+        shareUsageCount = (d.object(forKey: "shareUsageCount") as? Bool) ?? true
         disabledAgents = Set((d.array(forKey: "disabledAgents") as? [String]) ?? [])
         apply()
     }

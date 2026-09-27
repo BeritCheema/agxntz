@@ -7,13 +7,9 @@ BUNDLE := dist/$(APP).app
 build:
 	swift build -c release
 
-app: build
-	rm -rf $(BUNDLE)
-	mkdir -p $(BUNDLE)/Contents/MacOS
-	cp Support/Info.plist $(BUNDLE)/Contents/
-	cp $(BUILD) $(BUNDLE)/Contents/MacOS/$(APP)
-	codesign --force --sign - $(BUNDLE)
-	@echo "Built $(BUNDLE)"
+# Dev bundle: embeds Sparkle and ad-hoc signs (updater disabled for dev builds).
+app:
+	NO_ZIP=1 ./scripts/package.sh
 
 run: app
 	open $(BUNDLE)

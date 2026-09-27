@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store = SessionStore()
         statusBar = StatusBarController(store: store)
         store.start()
+        UpdateManager.shared.start()
+        UsagePing.start()
     }
 }
 

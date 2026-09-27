@@ -8,6 +8,8 @@
 	<string>agxntz</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.cheema.agxntz</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleExecutable</key>
 	<string>agxntz</string>
 	<key>CFBundleVersion</key>
@@ -22,5 +24,13 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/BeritCheema/agxntz/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>PfLJN4uLHzq3RMsHkm6c1Za15y0JSoEtE0+cJlfU3ys=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

@@ -238,6 +238,14 @@ final class StatusBarController: NSObject {
             menu.addItem(.separator())
         }
 
+        let updates = UpdateManager.shared
+        if updates.isEnabled {
+            let title = updates.pendingVersion.map { "Install Update \($0)…" } ?? "Check for Updates…"
+            let check = NSMenuItem(title: title, action: #selector(checkForUpdates), keyEquivalent: "")
+            check.target = self
+            menu.addItem(check)
+        }
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -257,6 +265,10 @@ final class StatusBarController: NSObject {
         if let id = sender.representedObject as? String {
             store.togglePin(id)
         }
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateManager.shared.checkForUpdates()
     }
 
     @objc private func openSettings() {

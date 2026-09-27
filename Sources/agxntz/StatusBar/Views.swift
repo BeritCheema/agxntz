@@ -149,6 +149,7 @@ struct MarqueeText: View {
 /// The dropdown: straight into Working / Waiting / Done groups, empty groups omitted.
 struct DropdownView: View {
     @ObservedObject var store: SessionStore
+    @ObservedObject private var updates = UpdateManager.shared
     var onOpenSettings: () -> Void = {}
     @State private var gearHover = false
 
@@ -170,6 +171,10 @@ struct DropdownView: View {
                     ForEach(group.1) { session in
                         SessionRow(session: session, store: store)
                     }
+                }
+                if let version = updates.pendingVersion {
+                    if !groups.isEmpty { Divider().padding(.vertical, 4) }
+                    UpdateRow(version: version) { updates.checkForUpdates() }
                 }
                 if groups.isEmpty {
                     Text("No active agents")
@@ -198,6 +203,35 @@ struct DropdownView: View {
             .padding(.top, 6)
             .padding(.trailing, 8)
         }
+    }
+}
+
+/// Shown at the bottom of the dropdown when a background check found an update.
+struct UpdateRow: View {
+    let version: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.accentColor)
+                Text("Update available: \(version)")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("Install…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 

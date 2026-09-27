@@ -18,14 +18,33 @@ get their own menu-bar item showing a colored dot plus the live activity text.
 
 ## Install
 
-Download the latest `agxntz-<version>.zip` from the
-[**Releases**](https://github.com/BeritCheema/agxntz/releases) page, unzip it,
-and drag **agxntz.app** to your Applications folder. Launch it — a dot cluster
+Download [**agxntz.zip**](https://github.com/BeritCheema/agxntz/releases/latest/download/agxntz.zip)
+(the latest release; all versions are on the
+[Releases](https://github.com/BeritCheema/agxntz/releases) page), unzip it, and
+drag **agxntz.app** to your Applications folder. Launch it — a dot cluster
 appears in the menu bar when agents are active (nothing shows when idle). To
 quit, right-click the menu-bar item → **Quit**.
 
 Requires macOS 14 (Sonoma) or later. Releases are signed with a Developer ID
 and notarized by Apple, so they open without Gatekeeper warnings.
+
+### Updates and usage count
+
+agxntz updates itself with [Sparkle](https://sparkle-project.org). Once a day it
+reads the update feed (`appcast.xml`) from the latest GitHub release; when a
+newer version exists, an **Update available** row appears in the dropdown (and
+the right-click menu), and installing it downloads the new build straight from
+GitHub. Updates are verified against both Apple's notarized Developer ID
+signature and a Sparkle EdDSA signature before installing. Automatic checks can
+be turned off in **Settings → Updates**.
+
+Separately, once a day agxntz sends an anonymous ping to `agxntz.com` so we can
+count active installs. It contains exactly two things: an install ID and the app
+version. The ID is a one-way hash of your Mac's hardware UUID with an
+app-specific salt — stable across reinstalls, but it can't be turned back into
+the hardware UUID. No IPs, names, or anything else are stored. Turn it off with
+**Settings → Updates → Share anonymous usage count**; updates keep working
+either way.
 
 ## Supported agents
 

@@ -48,13 +48,16 @@ jobs:
           AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
           AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: ./scripts/package.sh
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/agxntz-*.zip
+          files: |
+            dist/agxntz.zip
+            dist/appcast.xml
           generate_release_notes: true
           fail_on_unmatched_files: true
 
@@ -63,4 +66,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agxntz-app
-          path: dist/agxntz-*.zip
+          path: |
+            dist/agxntz.zip
+            dist/appcast.xml
