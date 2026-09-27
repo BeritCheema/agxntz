@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build agxntz.app (with Sparkle embedded), sign it, and optionally notarize,
-# zip, and produce a Sparkle appcast for the release.
+# Build agxntz.app (with Sparkle embedded), sign it, and optionally notarize it,
+# package it as agxntz.dmg (download) and agxntz.zip (Sparkle updates), and
+# produce a Sparkle appcast for the release.
 #
 # Local dev bundle (ad-hoc signed, no zip, updater disabled):
 #   ./scripts/package.sh            # or: make app
@@ -24,7 +25,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CLEANUP=()
-cleanup() { for f in "${CLEANUP[@]:-}"; do [ -n "$f" ] && rm -f "$f"; done; }
+# Must not change the exit status: with nothing to clean, a trailing failed
+# test would make a successful build exit 1.
+cleanup() { for f in "${CLEANUP[@]:-}"; do if [ -n "$f" ]; then rm -f "$f"; fi; done; return 0; }
 trap cleanup EXIT
 
 APP=agxntz
@@ -35,7 +38,8 @@ IDENTITY="${SIGNING_IDENTITY:--}"            # "-" = ad-hoc
 BUNDLE="dist/$APP.app"
 # Fixed asset name: releases/latest/download/agxntz.zip is a stable "latest"
 # link, and the agxntz.com update Worker looks for exactly this asset name.
-ZIP="dist/$APP.zip"
+ZIP="dist/$APP.zip"          # what Sparkle updates from
+DMG="dist/$APP.dmg"          # what people download
 APPCAST="dist/appcast.xml"
 SPARKLE_BIN=".build/artifacts/sparkle/Sparkle/bin"
 
@@ -43,7 +47,7 @@ echo "==> Building $APP ($VERSION)"
 swift build -c release
 
 echo "==> Assembling $BUNDLE"
-rm -rf "$BUNDLE" "$ZIP" "$APPCAST"
+rm -rf "$BUNDLE" "$ZIP" "$DMG" "$APPCAST"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Frameworks" "$BUNDLE/Contents/Resources"
 cp Support/Info.plist "$BUNDLE/Contents/Info.plist"
 cp Support/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
@@ -100,10 +104,14 @@ if notarize; then
         printf '%s' "$AC_API_KEY_P8" | base64 --decode > "$KEYFILE"
     fi
 
+    submit() {
+        xcrun notarytool submit "$1" \
+            --key "$KEYFILE" --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --wait
+    }
+
     echo "==> Notarizing (this waits for Apple, usually 1-5 min)"
     ditto -c -k --keepParent "$BUNDLE" "$ZIP"
-    xcrun notarytool submit "$ZIP" \
-        --key "$KEYFILE" --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --wait
+    submit "$ZIP"
     echo "==> Stapling ticket"
     xcrun stapler staple "$BUNDLE"
     rm -f "$ZIP"
@@ -113,6 +121,25 @@ fi
 
 echo "==> Zipping $ZIP"
 ditto -c -k --keepParent "$BUNDLE" "$ZIP"
+
+# The download for people: a disk image with the app and an Applications
+# shortcut to drag it onto. Built from the already-stapled app, then the image
+# itself is signed, notarized and stapled, so both the DMG and the app copied
+# out of it verify offline.
+echo "==> Building $DMG"
+STAGE="$(mktemp -d -t agxntz-dmg)"
+ditto "$BUNDLE" "$STAGE/$APP.app"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -quiet -volname "$APP" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG"
+rm -rf "$STAGE"
+if [ "$IDENTITY" != "-" ]; then
+    codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+fi
+if notarize; then
+    echo "==> Notarizing $DMG"
+    submit "$DMG"
+    xcrun stapler staple "$DMG"
+fi
 
 # Sparkle update signature + appcast. The appcast is published as a release
 # asset; the app's SUFeedURL points at releases/latest/download/appcast.xml.
@@ -151,7 +178,8 @@ EOF
     echo "==> Wrote $APPCAST"
 fi
 
-echo "==> Done: $ZIP"
+echo "==> Done: $ZIP, $DMG"
 if notarize; then
-    xcrun stapler validate "$BUNDLE" && echo "    notarization ticket stapled OK"
+    xcrun stapler validate "$BUNDLE" && echo "    app notarization ticket stapled OK"
+    xcrun stapler validate "$DMG" && echo "    dmg notarization ticket stapled OK"
 fi

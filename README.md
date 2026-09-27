@@ -27,7 +27,7 @@ changes them and needs no plugins or hooks.
 
 ## Install
 
-Download it from [agxntz.com](https://agxntz.com), unzip it and drag the app to
+Download it from [agxntz.com](https://agxntz.com), open the dmg and drag the app to
 Applications. It is signed and notarized, so it opens with no warning.
 
 ## Build from source

@@ -1,7 +1,8 @@
 # Releasing
 
-Releases ship `agxntz.zip` and the Sparkle feed `appcast.xml` as assets of a
-GitHub Release.
+Each release publishes three assets: `agxntz.dmg` (the download people install from),
+`agxntz.zip` (what Sparkle updates from) and `appcast.xml` (the Sparkle feed). The DMG
+and the app inside it are each notarized and stapled.
 
 Releases are produced by GitHub Actions (`.github/workflows/release.yml`): push
 a version tag and CI builds on macOS, signs with your Developer ID, notarizes
