@@ -28,17 +28,13 @@ changes them and needs no plugins or hooks.
 ## Install
 
 Download it from [agxntz.com](https://agxntz.com), open the dmg and drag the app to
-Applications. It is signed and notarized, so it opens with no warning.
+Applications.
 
 ## Build from source
 
 ```sh
 make run
 ```
-
-That builds the app, puts it in `dist/agxntz.app` with Sparkle inside, signs it ad hoc and
-opens it. `.build/release/agxntz --scan` prints one detection pass to the terminal.
-Releases are signed, notarized and published by CI; see [docs/releasing.md](docs/releasing.md).
 
 ## Contributing
 
