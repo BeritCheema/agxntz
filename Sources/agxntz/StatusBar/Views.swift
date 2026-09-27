@@ -174,7 +174,7 @@ struct DropdownView: View {
                 }
                 if let version = updates.pendingVersion {
                     if !groups.isEmpty { Divider().padding(.vertical, 4) }
-                    UpdateRow(version: version) { updates.checkForUpdates() }
+                    UpdateRow(version: version, installing: updates.isInstalling) { updates.checkForUpdates() }
                 }
                 if groups.isEmpty {
                     Text("No active agents")
@@ -206,9 +206,10 @@ struct DropdownView: View {
     }
 }
 
-/// Shown at the bottom of the dropdown when a background check found an update.
+/// Shown at the bottom of the dropdown when an update is available.
 struct UpdateRow: View {
     let version: String
+    let installing: Bool
     let action: () -> Void
     @State private var hovering = false
 
@@ -218,19 +219,20 @@ struct UpdateRow: View {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.accentColor)
-                Text("Update available: \(version)")
+                Text(installing ? "Updating…" : "New version available")
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
-                Text("Install…")
-                    .font(.system(size: 11))
+                Text("\(UpdateManager.currentVersion) → \(version)")
+                    .font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
-            .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
+            .background(hovering && !installing ? Color.primary.opacity(0.05) : Color.clear)
         }
         .buttonStyle(.plain)
+        .disabled(installing)
         .onHover { hovering = $0 }
     }
 }

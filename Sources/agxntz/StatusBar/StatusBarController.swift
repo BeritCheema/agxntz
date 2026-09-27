@@ -240,7 +240,7 @@ final class StatusBarController: NSObject {
 
         let updates = UpdateManager.shared
         if updates.isEnabled {
-            let title = updates.pendingVersion.map { "Install Update \($0)…" } ?? "Check for Updates…"
+            let title = updates.pendingVersion.map { "Update to \($0)…" } ?? "Check for Updates…"
             let check = NSMenuItem(title: title, action: #selector(checkForUpdates), keyEquivalent: "")
             check.target = self
             menu.addItem(check)

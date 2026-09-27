@@ -5,32 +5,38 @@ import Sparkle
 /// Owns Sparkle. The update feed (appcast.xml) and the update archive both come
 /// straight from the GitHub release — see SUFeedURL in Info.plist.
 ///
-/// agxntz is a menu-bar (LSUIElement) app, so scheduled checks use Sparkle's
-/// "gentle reminders": when a background check finds an update, Sparkle does not
-/// pop a window over whatever the user is doing. Instead `pendingVersion` is set
-/// and our own UI (dropdown row, right-click menu, Settings) offers the update;
-/// clicking it hands back to Sparkle, which shows its install prompt.
+/// Sparkle does the checking, downloading, EdDSA/code-signature verification,
+/// installing and relaunching; the UI is ours and deliberately minimal (see
+/// MinimalUserDriver). One prompt: "A new version of agxntz is available —
+/// 0.1.0 → 0.2.0" with Update / Later. A background check never interrupts: it
+/// sets `pendingVersion`, which shows a row in the dropdown and right-click
+/// menu, and clicking that brings up the prompt.
 @MainActor
 final class UpdateManager: NSObject, ObservableObject {
     static let shared = UpdateManager()
 
-    /// Version of an update found by a background check, awaiting the user.
+    /// Version of an available update awaiting the user's answer.
     @Published private(set) var pendingVersion: String?
+    /// True while an accepted update downloads and installs.
+    @Published private(set) var isInstalling = false
 
-    /// Mirrors Sparkle's own "check automatically" preference.
+    /// Mirrors Sparkle's "check automatically" preference.
     @Published var automaticallyChecks = false {
         didSet {
-            guard let updater = controller?.updater,
-                  updater.automaticallyChecksForUpdates != automaticallyChecks else { return }
+            guard let updater, updater.automaticallyChecksForUpdates != automaticallyChecks else { return }
             updater.automaticallyChecksForUpdates = automaticallyChecks
         }
     }
 
-    private var controller: SPUStandardUpdaterController?
+    private var updater: SPUUpdater?
+    private let driver = MinimalUserDriver()
+    /// Sparkle's pending "install or not?" callback for `pendingVersion`.
+    private var pendingReply: ((SPUUserUpdateChoice) -> Void)?
+    /// A check the user started (so "up to date" / errors get reported).
+    private var userInitiated = false
 
-    /// False for local dev builds (not a stamped release), where update checks
-    /// would compare against a meaningless version.
-    var isEnabled: Bool { controller != nil }
+    /// False for local dev builds (not a stamped release).
+    var isEnabled: Bool { updater != nil }
 
     static var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -45,22 +51,97 @@ final class UpdateManager: NSObject, ObservableObject {
     }
 
     func start() {
-        guard controller == nil, Self.shouldRun else {
+        guard updater == nil, Self.shouldRun else {
             Log.d("updater: disabled for this build (version \(Self.currentVersion))")
             return
         }
-        let c = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: self)
-        controller = c
-        automaticallyChecks = c.updater.automaticallyChecksForUpdates
+        let u = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: self)
+        do {
+            try u.start()
+        } catch {
+            Log.d("updater: failed to start: \(error.localizedDescription)")
+            return
+        }
+        updater = u
+        automaticallyChecks = u.automaticallyChecksForUpdates
         Log.d("updater: started, automatic checks \(automaticallyChecks)")
+        // Test hook: run a user-initiated check right away.
+        if ProcessInfo.processInfo.environment["AGXNTZ_CHECK_NOW"] == "1" { checkForUpdates() }
     }
 
-    /// User-initiated check. If a background check already found an update, this
-    /// shows it; otherwise Sparkle checks now and reports the result.
+    /// "Check for Updates…" / the update row: if an update is already waiting,
+    /// ask about it; otherwise check now and report the result.
     func checkForUpdates() {
-        guard let controller else { return }
-        NSApp.activate(ignoringOtherApps: true) // accessory app: bring Sparkle's window forward
-        controller.checkForUpdates(nil)
+        guard let updater, !isInstalling else { return }
+        if pendingReply != nil {
+            promptForPending()
+        } else {
+            userInitiated = true
+            updater.checkForUpdates()
+        }
+    }
+
+    // MARK: Driven by MinimalUserDriver (always on the main thread)
+
+    fileprivate func updateFound(version: String, userInitiated: Bool, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        Log.d("updater: found \(version) (\(userInitiated ? "user check" : "background"))")
+        pendingVersion = version
+        pendingReply = reply
+        if userInitiated { promptForPending() }   // background: just surface the row
+    }
+
+    fileprivate func downloadStarted() { isInstalling = true }
+
+    fileprivate func updateNotFound() {
+        if userInitiated {
+            alert(title: "agxntz is up to date", detail: "Version \(Self.currentVersion)")
+        }
+        reset()
+    }
+
+    fileprivate func updateFailed(_ error: Error) {
+        Log.d("updater: error: \(error.localizedDescription)")
+        if userInitiated || isInstalling {
+            alert(title: "Couldn't update agxntz", detail: error.localizedDescription)
+        }
+        reset()
+    }
+
+    fileprivate func reset() {
+        pendingVersion = nil
+        pendingReply = nil
+        isInstalling = false
+        userInitiated = false
+    }
+
+    // MARK: UI
+
+    private func promptForPending() {
+        guard let reply = pendingReply, let version = pendingVersion else { return }
+        pendingReply = nil
+        let alert = NSAlert()
+        alert.messageText = "A new version of agxntz is available"
+        alert.informativeText = "\(Self.currentVersion) → \(version)"
+        alert.addButton(withTitle: "Update")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)   // menu-bar app: bring the alert forward
+        let response = alert.runModal()
+        Log.d("updater: prompt answered \(response == .alertFirstButtonReturn ? "Update" : "Later")")
+        if response == .alertFirstButtonReturn {
+            isInstalling = true
+            reply(.install)
+        } else {
+            pendingVersion = nil
+            reply(.dismiss)                        // offered again at the next check
+        }
+    }
+
+    private func alert(title: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 }
 
@@ -72,40 +153,71 @@ extension UpdateManager: SPUUpdaterDelegate {
     }
 }
 
-// Sparkle calls these on the main thread; they're nonisolated only to satisfy
-// the Objective-C protocol, so hop into main-actor isolation explicitly.
-extension UpdateManager: SPUStandardUserDriverDelegate {
-    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+/// Sparkle's non-Sendable callbacks, carried across the isolation boundary.
+/// Sparkle invokes the user driver on the main thread and they're only ever
+/// used there.
+private struct MainThreadBox<T>: @unchecked Sendable { let value: T }
 
-    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
-        _ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool
-    ) -> Bool {
-        // Only let Sparkle show its window right away if the check happened just
-        // as the app launched / was engaged; otherwise we surface it gently.
-        immediateFocus
+/// Sparkle user driver with the smallest possible UI: one Update / Later
+/// prompt, silent download + install + relaunch, and an alert only for
+/// user-initiated "up to date" results or failures. Release notes, progress
+/// windows, "skip this version" and the auto-install checkbox are omitted.
+///
+/// The protocol is nonisolated Objective-C, but Sparkle calls it on the main
+/// thread, so each method hops into main-actor isolation explicitly.
+private final class MinimalUserDriver: NSObject, SPUUserDriver {
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        // Automatic checks are on by default (SUEnableAutomaticChecks); never ask.
+        reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false))
     }
 
-    nonisolated func standardUserDriverWillHandleShowingUpdate(
-        _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState
-    ) {
-        let version = update.displayVersionString
-        Log.d("updater: found \(version) (\(handleShowingUpdate ? "Sparkle shows it" : "gentle reminder"))")
+    func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {}
+
+    func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState,
+                         reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        let version = appcastItem.displayVersionString
+        let userInitiated = state.userInitiated
+        let box = MainThreadBox(value: reply)
         MainActor.assumeIsolated {
-            if handleShowingUpdate {
-                // An accessory (menu-bar) app isn't activated on its own, so
-                // Sparkle's window would open behind other apps' windows.
-                NSApp.activate(ignoringOtherApps: true)
-            } else {
-                self.pendingVersion = version
-            }
+            UpdateManager.shared.updateFound(version: version, userInitiated: userInitiated, reply: box.value)
         }
     }
 
-    nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        MainActor.assumeIsolated { self.pendingVersion = nil }
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
+
+    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        MainActor.assumeIsolated { UpdateManager.shared.updateNotFound() }
+        acknowledgement()
     }
 
-    nonisolated func standardUserDriverWillFinishUpdateSession() {
-        MainActor.assumeIsolated { self.pendingVersion = nil }
+    func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        let box = MainThreadBox(value: error)
+        MainActor.assumeIsolated { UpdateManager.shared.updateFailed(box.value) }
+        acknowledgement()
+    }
+
+    func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        MainActor.assumeIsolated { UpdateManager.shared.downloadStarted() }
+    }
+
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {}
+    func showDownloadDidReceiveData(ofLength length: UInt64) {}
+    func showDownloadDidStartExtractingUpdate() {}
+    func showExtractionReceivedProgress(_ progress: Double) {}
+
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        reply(.install)   // the user already said Update
+    }
+
+    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool,
+                              retryTerminatingApplication: @escaping () -> Void) {}
+
+    func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        acknowledgement()
+    }
+
+    func dismissUpdateInstallation() {
+        MainActor.assumeIsolated { UpdateManager.shared.reset() }
     }
 }

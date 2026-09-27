@@ -147,13 +147,13 @@ struct SettingsView: View {
             .padding(.vertical, 4)
             HStack {
                 if let v = updates.pendingVersion {
-                    Text("Version \(v) is available").font(.system(size: 12))
+                    Text("\(UpdateManager.currentVersion) → \(v) available").font(.system(size: 12))
                 } else {
                     Text("Checks GitHub once a day.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(updates.pendingVersion == nil ? "Check Now" : "Install…") { updates.checkForUpdates() }
+                Button(updates.pendingVersion == nil ? "Check Now" : "Update…") { updates.checkForUpdates() }
                     .disabled(!updates.isEnabled)
             }
             .padding(.vertical, 4)
