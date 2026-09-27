@@ -27,14 +27,8 @@ changes them and needs no plugins or hooks.
 
 ## Install
 
-Download [agxntz.zip](https://github.com/BeritCheema/agxntz/releases/latest/download/agxntz.zip),
-unzip it and drag the app to Applications. It is signed and notarized, so it opens with no
-warning.
-
-agxntz updates itself with [Sparkle](https://sparkle-project.org). Once a day it checks
-the latest GitHub release and asks before installing anything. Once a day it also sends
-agxntz.com an anonymous install ID and its version number, so we can count users. The ID is
-a one-way hash of the Mac's hardware UUID. Both can be turned off in Settings.
+Download it from [agxntz.com](https://agxntz.com), unzip it and drag the app to
+Applications. It is signed and notarized, so it opens with no warning.
 
 ## Build from source
 
