@@ -15,7 +15,7 @@ green while it works, orange when it needs you, blue when it's done. Click the d
 a list of every session, what it's doing right now and its latest message. Pin one to
 keep its live activity scrolling in the menu bar.
 
-[![agxntz demo](docs/demo.gif)](https://agxntz.com/video/product-demo.mp4)
+[![Watch the 42-second agxntz demo](docs/demo.gif)](https://agxntz.com/video/product-demo.mp4?v=openscreen-v7)
 
 It works with Claude Code, Codex, OpenCode, Grok, pi and Oh My Pi, including their
 sub-agents. It only reads the transcripts those agents already write to disk. It never
