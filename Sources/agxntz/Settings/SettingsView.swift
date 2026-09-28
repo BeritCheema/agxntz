@@ -137,15 +137,6 @@ struct SettingsView: View {
             .padding(.vertical, 4)
             Divider().padding(.vertical, 4)
             HStack {
-                Text("Check for updates automatically").font(.system(size: 13))
-                Spacer()
-                Toggle("", isOn: $updates.automaticallyChecks)
-                    .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                    .tint(settingsAccent)
-                    .disabled(!updates.isEnabled)
-            }
-            .padding(.vertical, 4)
-            HStack {
                 if let v = updates.pendingVersion {
                     Text("\(UpdateManager.currentVersion) → \(v) available").font(.system(size: 12))
                 } else {

@@ -20,14 +20,6 @@ final class UpdateManager: NSObject, ObservableObject {
     /// True while an accepted update downloads and installs.
     @Published private(set) var isInstalling = false
 
-    /// Mirrors Sparkle's "check automatically" preference.
-    @Published var automaticallyChecks = false {
-        didSet {
-            guard let updater, updater.automaticallyChecksForUpdates != automaticallyChecks else { return }
-            updater.automaticallyChecksForUpdates = automaticallyChecks
-        }
-    }
-
     private var updater: SPUUpdater?
     private let driver = MinimalUserDriver()
     /// Sparkle's pending "install or not?" callback for `pendingVersion`.
@@ -62,9 +54,12 @@ final class UpdateManager: NSObject, ObservableObject {
             Log.d("updater: failed to start: \(error.localizedDescription)")
             return
         }
+        // Daily update checks are always on — not a user preference. Sparkle
+        // persists this in user defaults, so re-assert it every launch to
+        // override any value stored by an earlier build.
+        u.automaticallyChecksForUpdates = true
         updater = u
-        automaticallyChecks = u.automaticallyChecksForUpdates
-        Log.d("updater: started, automatic checks \(automaticallyChecks)")
+        Log.d("updater: started, daily checks on")
         // Test hook: run a user-initiated check right away.
         if ProcessInfo.processInfo.environment["AGXNTZ_CHECK_NOW"] == "1" { checkForUpdates() }
     }
