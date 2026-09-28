@@ -1,12 +1,11 @@
 import Foundation
 
-/// Anonymous usage count: POSTs `{"id": <install UUID>, "version": <app version>}`
+/// Anonymous usage count: POSTs `{"id": <install ID>, "version": <app version>}`
 /// to agxntz.com at most once per 24 hours — the last send time is persisted, so
-/// relaunching doesn't send again. The ID is a random UUID generated on first
-/// launch, not derived from the Mac or the user. Nothing is sent when the user
-/// turns off "Share anonymous usage count", and nothing else is ever sent.
-/// Fire-and-forget: failures are ignored and never affect the app. Update checks
-/// are independent of this (Sparkle reads the feed from GitHub, also daily).
+/// relaunching doesn't send again. The ID is DeviceID: a salted one-way hash of
+/// the hardware UUID, stable per Mac and not reversible. Nothing else is ever
+/// sent. Fire-and-forget: failures are ignored and never affect the app. Update
+/// checks are independent of this (Sparkle reads the feed from GitHub, also daily).
 @MainActor
 enum UsagePing {
     /// AGXNTZ_PING_URL overrides the endpoint for testing.
@@ -39,7 +38,6 @@ enum UsagePing {
 
     static func sendIfDue() {
         let settings = AppSettings.shared
-        guard settings.shareUsageCount else { return }
         let defaults = UserDefaults.standard
         if let last = defaults.object(forKey: lastSentKey) as? Date,
            Date().timeIntervalSince(last) < interval { return }

@@ -9,7 +9,6 @@ let settingsAccent = Color(red: 206 / 255, green: 245 / 255, blue: 160 / 255)
 struct SettingsView: View {
     @ObservedObject var store: SessionStore
     @ObservedObject var settings = AppSettings.shared
-    @ObservedObject var updates = UpdateManager.shared
 
     var body: some View {
         ScrollView {
@@ -21,7 +20,6 @@ struct SettingsView: View {
                 polling
                 agents
                 pinned
-                updatesCard
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -121,44 +119,6 @@ struct SettingsView: View {
                     if kind != AgentKind.allCases.last { Divider() }
                 }
             }
-        }
-    }
-
-    private var updatesCard: some View {
-        Card(title: "Updates") {
-            HStack {
-                Text("Version").font(.system(size: 13))
-                Spacer()
-                Text(UpdateManager.currentVersion)
-                    .font(.system(size: 12)).monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-            .padding(.vertical, 4)
-            Divider().padding(.vertical, 4)
-            HStack {
-                if let v = updates.pendingVersion {
-                    Text("\(UpdateManager.currentVersion) → \(v) available").font(.system(size: 12))
-                } else {
-                    Text("Checks GitHub once a day.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(updates.pendingVersion == nil ? "Check Now" : "Update…") { updates.checkForUpdates() }
-                    .disabled(!updates.isEnabled)
-            }
-            .padding(.vertical, 4)
-            Divider().padding(.vertical, 4)
-            HStack {
-                Text("Share anonymous usage count").font(.system(size: 13))
-                Spacer()
-                Toggle("", isOn: $settings.shareUsageCount)
-                    .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                    .tint(settingsAccent)
-            }
-            .padding(.vertical, 4)
-            Text("Once a day, sends a random install ID and the app version to agxntz.com so we can count active users. Nothing else is sent.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
 
